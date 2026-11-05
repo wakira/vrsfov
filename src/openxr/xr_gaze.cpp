@@ -341,22 +341,45 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
   }
   session.syncedSinceLastGaze = false;
 
-  // Optional second source (VRSFOV_OPENVR_GAZE=1): on runtimes whose OpenXR
-  // gaze action never activates, SteamVR's own eye-tracked foveation centre may
-  // still have the data. It is a screen-space point per eye, so it replaces the
-  // projection in step 3 rather than the direction.
+  // SteamVR-native sources. The publisher is a separate process and is the
+  // preferred one: running an in-process OpenVR client at the same time as the
+  // publisher connects two extra clients to SteamVR and can confuse VRLink's
+  // eye tracking. Use the publisher when it exists; otherwise the in-process
+  // client is the fallback.
   bool openvrTracked = false;
+  bool publisherTracked = false;
   float openvrU[2] = {0.5f, 0.5f}, openvrV[2] = {0.5f, 0.5f};
-  // When the native OpenXR action worked and then drops out (some games do this
-  // when they enter actual gameplay), try SteamVR's own centre automatically.
-  // An explicit VRSFOV_OPENVR_GAZE=0 disables both the automatic and manual path.
   const char* openvrSetting = getenv("VRSFOV_OPENVR_GAZE");
   const bool openvrExplicitlyOff =
       openvrSetting && *openvrSetting && !envFlag("VRSFOV_OPENVR_GAZE");
   const bool openvrAuto = session.eyeTrackedLogged && !eyeTracked;
   const bool wantOpenvr = !openvrExplicitlyOff &&
                           (envFlag("VRSFOV_OPENVR_GAZE") || openvrAuto);
-  if (!eyeTracked && wantOpenvr) {
+  const bool publisherPresent = shmGazePublisherPresent();
+
+  if (!eyeTracked && publisherPresent) {
+    ShmGazeSample sample;
+    if (readShmGaze(sample)) {
+      openvrU[0] = sample.u0;
+      openvrV[0] = sample.v0;
+      openvrU[1] = sample.u1;
+      openvrV[1] = sample.v1;
+      openvrTracked = true;
+      publisherTracked = true;
+      LOG_ONCE(INFO, "gaze-publisher-active",
+               "using the out-of-process vrsfov-gaze publisher for eye tracking");
+    }
+    if (publisherTracked) {
+      // A publisher and an in-process client must not both stay connected.
+      static bool closedInProcess = false;
+      if (!closedInProcess) {
+        closedInProcess = true;
+        openvrGazeShutdown();
+      }
+    }
+  }
+
+  if (!eyeTracked && !openvrTracked && !publisherPresent && wantOpenvr) {
     if (openvrAuto && !envFlag("VRSFOV_OPENVR_GAZE")) {
       LOG_ONCE(INFO, "gaze-auto-openvr",
                "native OpenXR gaze became inactive; trying the SteamVR OpenVR source");
@@ -385,24 +408,6 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
         openvrV[1] = session.openvrV[1];
         openvrTracked = true;
       }
-    }
-  }
-
-  // Last resort: the out-of-process publisher. It is a separate SteamVR client,
-  // so it survives games that deactivate their in-process OpenXR action during
-  // gameplay (VTOL VR does exactly that).
-  bool publisherTracked = false;
-  if (!eyeTracked && !openvrTracked && !openvrExplicitlyOff) {
-    ShmGazeSample sample;
-    if (readShmGaze(sample)) {
-      openvrU[0] = sample.u0;
-      openvrV[0] = sample.v0;
-      openvrU[1] = sample.u1;
-      openvrV[1] = sample.v1;
-      openvrTracked = true;
-      publisherTracked = true;
-      LOG_ONCE(INFO, "gaze-publisher-active",
-               "using the out-of-process vrsfov-gaze publisher for eye tracking");
     }
   }
 

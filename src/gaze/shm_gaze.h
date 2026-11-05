@@ -10,6 +10,10 @@ struct ShmGazeSample {
   int64_t monoNs = 0;
 };
 
+// True when the publisher's /dev/shm segment exists. Used to avoid starting a
+// second in-process OpenVR client while the publisher is the active source.
+bool shmGazePublisherPresent();
+
 // Reads the latest sample from the out-of-process vrsfov-gaze publisher. Also
 // touches the "want" file so the publisher connects to SteamVR on demand.
 // Returns false when there is no publisher, no fresh sample, or a torn write.

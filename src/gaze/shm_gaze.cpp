@@ -7,6 +7,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <string>
+
 #include "common/log.h"
 #include "common/shared_state.h"
 #include "gaze/gaze_shm.h"
@@ -30,6 +32,10 @@ void touchWant(int64_t now) {
 }
 
 }  // namespace
+
+bool shmGazePublisherPresent() {
+  return access((std::string("/dev/shm") + kGazeShmName).c_str(), R_OK) == 0;
+}
 
 bool readShmGaze(ShmGazeSample& out) {
   const int64_t now = nowNs();
