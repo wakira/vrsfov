@@ -38,8 +38,9 @@
             export VRSFOV_OPENVR_LIBRARY_DIR="${pkgs.openvr}/lib"
             export VRSFOV_GLSLANG_VALIDATOR="${pkgs.glslang}/bin/glslangValidator"
             echo "vrsfov dev shell"
-            echo "  cmake -B build -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=pc|frame"
-            echo "  cmake --build build && ctest --test-dir build --output-on-failure"
+            echo "  PC:    cmake -B build-pc -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=pc"
+            echo "  Frame: cmake -B build-frame -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=frame"
+            echo "  cmake --build build-pc && ctest --test-dir build-pc --output-on-failure"
           '';
         };
       });

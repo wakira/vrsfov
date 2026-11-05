@@ -28,6 +28,7 @@ mkShell {
     export VRSFOV_OPENVR_LIBRARY_DIR="${openvr}/lib"
     export VRSFOV_GLSLANG_VALIDATOR="${glslang}/bin/glslangValidator"
     echo "vrsfov dev shell (nix-shell)"
-    echo "  cmake -B build -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=pc|frame"
+    echo "  PC:    cmake -B build-pc -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=pc"
+    echo "  Frame: cmake -B build-frame -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=frame"
   '';
 }
