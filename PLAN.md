@@ -40,7 +40,7 @@ headset or a real OpenXR runtime are verified against a **mock runtime** instead
 
 Current test suite: the PC target runs 18 entries (unit tests, 6 GPU modes, 5 end-to-end
 mock-runtime tests, two standalone tests and the hot-reload test) plus the two layer probes; 59 unit
-tests cover the pure modules. The Frame target runs 11 entries and 51 unit tests (no OpenXR e2e). The suite is self-contained: it enables the build-dir Vulkan layer with
+tests cover the pure modules. The Frame target runs 12 entries and 51 unit tests (no OpenXR e2e; includes the platform-default standalone test). The suite is self-contained: it enables the build-dir Vulkan layer with
 `VK_INSTANCE_LAYERS`/`VK_LAYER_PATH` and points the OpenXR loader at `XR_API_LAYER_PATH`, so a clean
 checkout does not need an installed layer first.
 

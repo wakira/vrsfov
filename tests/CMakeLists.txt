@@ -180,6 +180,15 @@ if(VRSFOV_BUILD_GPU_TESTS)
   add_test(NAME vk_vrs_test_standalone_env COMMAND vk_vrs_test dynamic)
   set_tests_properties(vk_vrs_test_standalone_env PROPERTIES ENVIRONMENT "${VRSFOV_STANDALONE_ENV}")
 
+  if(VRSFOV_FRAME)
+    # The frame build must foveate without an explicit standalone=1: that is the
+    # platform default, and an OpenVR game has no config section to rely on.
+    add_test(NAME vk_vrs_test_frame_default COMMAND vk_vrs_test dynamic)
+    set_tests_properties(vk_vrs_test_frame_default PROPERTIES
+      ENVIRONMENT
+        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_EYE_SIZE=1024x1024;VRSFOV_FIXED_INNER_RADIUS=0.25;VRSFOV_FIXED_OUTER_RADIUS=0.45;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config")
+  endif()
+
   # draw_radii: the debug circles must appear in the rate map as a rate that is
   # neither the fovea rate nor the outer rate (the same path that puts the
   # circles in a game's eye image).

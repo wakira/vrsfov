@@ -161,11 +161,12 @@ selects the publisher's SteamVR client type (2/other by default).
 | `xr_vk_e2e_device_first` | Vulkan device created before the XrInstance: late activation still follows gaze |
 | `d3d11_smoke` (script) | the layer works with DXVK: `bash tests/d3d11_smoke/run-with-wine.sh` builds a small D3D11 program with mingw-w64 and runs it under wine + DXVK, plain and with the layer foveating |
 | `vk_vrs_test_standalone_env` / `_file` | standalone fixed foveation without any OpenXR instance, configured by environment / by an `[exe:…]` section |
+| `vk_vrs_test_frame_default` | the frame build foveates without an explicit `standalone = 1` (platform default) |
 | `standalone_hot_reload` | rewriting `settings.ini` while a standalone app renders is picked up |
 
-The GPU tests need the layer to be findable by the loaders (the test environment adds
-`VK_LAYER_PATH`; `scripts/dev-install.sh` keeps the installed copy in sync), and a Vulkan device with
-attachment VRS.
+The GPU tests are self-contained: they enable the build-dir layer with `VK_LAYER_PATH` and
+`VK_INSTANCE_LAYERS` (OpenXR tests also set `XR_API_LAYER_PATH`), so no installed layer is required.
+They need a Vulkan device with attachment VRS.
 
 ### Watching a game attempt live
 
