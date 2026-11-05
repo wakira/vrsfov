@@ -97,8 +97,7 @@ const char* const kKeys[] = {
     "enabled",           "eye_tracking",      "inner_radius",   "outer_radius",
     "fixed_inner_radius", "fixed_outer_radius", "inner_rate",    "middle_rate",
     "outer_rate",        "horizontal_scale",  "fixed_offset_x", "fixed_offset_y",
-    "gaze_offset_x",     "gaze_offset_y",     "smoothing",      "gaze_yflip",
-    "preset",            "texel_size",
+    "smoothing",         "gaze_yflip",        "preset",         "texel_size",
     "size_tolerance",    "min_size_ratio",    "standalone",     "eye_size",
     "debug_mode",        "draw_radii",        "ring_width",     "log_level"};
 
@@ -279,12 +278,6 @@ void applyConfigKey(Config& c, const std::string& keyIn, const std::string& valu
   } else if (key == "fixed_offset_y") {
     if (!parseFloat(value, f)) goto bad;
     c.fixedOffsetY = f;
-  } else if (key == "gaze_offset_x") {
-    if (!parseFloat(value, f)) goto bad;
-    c.gazeOffsetX = f;
-  } else if (key == "gaze_offset_y") {
-    if (!parseFloat(value, f)) goto bad;
-    c.gazeOffsetY = f;
   } else if (key == "smoothing") {
     if (!parseFloat(value, f)) goto bad;
     c.smoothing = f;
@@ -379,8 +372,6 @@ void validateConfig(Config& c) {
   c.horizontalScale = clampf(c.horizontalScale, 0.05f, 20.f);
   c.fixedOffsetX = clampf(c.fixedOffsetX, -10.f, 10.f);
   c.fixedOffsetY = clampf(c.fixedOffsetY, -10.f, 10.f);
-  c.gazeOffsetX = clampf(c.gazeOffsetX, -1.f, 1.f);
-  c.gazeOffsetY = clampf(c.gazeOffsetY, -1.f, 1.f);
   c.smoothing = clampf(c.smoothing, 0.f, 0.99f);
   c.sizeTolerance = clampf(c.sizeTolerance, 0.f, 1.f);
   c.minSizeRatio = clampf(c.minSizeRatio, 0.05f, 2.f);
@@ -513,16 +504,16 @@ std::string configSummary(const Config& c) {
   char buf[640];
   snprintf(buf, sizeof(buf),
            "enabled=%d eye_tracking=%d standalone=%d eye_size=%s radii eye %.2f/%.2f fixed "
-           "%.2f/%.2f rates %s/%s/%s hscale %.2f fixed offset (%.2f,%.2f) gaze offset "
-           "(%.2f,%.2f) smoothing %.2f yflip=%d preset %s texel %u debug %d rings %s x%u",
+           "%.2f/%.2f rates %s/%s/%s hscale %.2f offset (%.2f,%.2f) smoothing %.2f "
+           "yflip=%d preset %s texel %u debug %d rings %s x%u",
            (int)c.enabled, (int)c.eyeTracking, (int)c.standalone,
            c.eyeWidth ? (std::to_string(c.eyeWidth) + "x" + std::to_string(c.eyeHeight)).c_str()
                       : "auto",
            c.innerRadius, c.outerRadius, c.fixedInnerRadius, c.fixedOuterRadius,
            rateToString(c.innerRate).c_str(), rateToString(c.middleRate).c_str(),
            rateToString(c.outerRate).c_str(), c.horizontalScale, c.fixedOffsetX, c.fixedOffsetY,
-           c.gazeOffsetX, c.gazeOffsetY, c.smoothing, (int)c.gazeYFlip, c.preset.c_str(),
-           c.texelSize, c.debugMode, drawRadiiName(c.drawRadii), c.ringWidth);
+           c.smoothing, (int)c.gazeYFlip, c.preset.c_str(), c.texelSize, c.debugMode,
+           drawRadiiName(c.drawRadii), c.ringWidth);
   return buf;
 }
 
