@@ -98,7 +98,7 @@ if(VRSFOV_BUILD_GPU_TESTS)
     add_test(NAME xr_layer_probe COMMAND xr_layer_probe)
     set_tests_properties(xr_layer_probe PROPERTIES
       ENVIRONMENT
-        "XR_API_LAYER_PATH=${VRSFOV_XR_MANIFEST_DIR};VRSFOV_ENABLE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state")
+        "XR_API_LAYER_PATH=${VRSFOV_XR_MANIFEST_DIR};XR_ENABLE_API_LAYERS=XR_APILAYER_VRSFOV_foveated_rendering;VRSFOV_EXPECT_LAYER=1;VRSFOV_ENABLE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state")
   else()
     message(WARNING "libopenxr_loader not found; the OpenXR probe will not run")
   endif()

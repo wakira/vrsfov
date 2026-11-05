@@ -5,10 +5,29 @@
 #include <openxr/openxr.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
 int main() {
+  bool layerFound = false;
+  uint32_t layerCount = 0;
+  if (XR_SUCCEEDED(xrEnumerateApiLayerProperties(0, &layerCount, nullptr))) {
+    std::vector<XrApiLayerProperties> layers(layerCount);
+    for (auto& l : layers) l.type = XR_TYPE_API_LAYER_PROPERTIES;
+    if (layerCount && XR_SUCCEEDED(xrEnumerateApiLayerProperties(layerCount, &layerCount,
+                                                                  layers.data()))) {
+      for (const auto& l : layers) {
+        printf("layer: %s\n", l.layerName);
+        if (strcmp(l.layerName, "XR_APILAYER_VRSFOV_foveated_rendering") == 0) layerFound = true;
+      }
+    }
+  }
+  if (getenv("VRSFOV_EXPECT_LAYER") && !layerFound) {
+    fprintf(stderr, "FAIL: XR_APILAYER_VRSFOV_foveated_rendering is not in the layer list\n");
+    return 1;
+  }
+
   uint32_t count = 0;
   XrResult result = xrEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr);
   printf("xrEnumerateInstanceExtensionProperties -> %d (%u extensions)\n", (int)result, count);
