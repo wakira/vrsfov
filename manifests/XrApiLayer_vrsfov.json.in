@@ -1,0 +1,12 @@
+{
+  "file_format_version": "1.0.0",
+  "api_layer": {
+    "name": "XR_APILAYER_VRSFOV_foveated_rendering",
+    "library_path": "@VRSFOV_LIBRARY_PATH@",
+    "api_version": "1.0",
+    "implementation_version": "1",
+    "description": "VRS-based foveated rendering for Vulkan apps",
+    "disable_environment": "VRSFOV_DISABLE",
+    "enable_environment": "VRSFOV_ENABLE"
+  }
+}

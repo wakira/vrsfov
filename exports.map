@@ -1,0 +1,10 @@
+/* Only the two loader negotiation entry points are exported.
+ * Everything else is internal (vrsfov_*) and reached through the
+ * GetProcAddr functions returned to the loaders. */
+{
+  global:
+    xrNegotiateLoaderApiLayerInterface;
+    vkNegotiateLoaderLayerInterfaceVersion;
+  local:
+    *;
+};
