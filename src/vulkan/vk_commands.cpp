@@ -265,7 +265,7 @@ void beginRenderingImpl(VkCommandBuffer cmd, const VkRenderingInfo* info,
   const uint32_t t = data->caps.texel;
   const uint32_t sw = (desc.width + t - 1) / t;
   const uint32_t sh = (desc.height + t - 1) / t;
-  RateImage* img = acquireDynamicRateImage(*data, sw, sh, rateLayers);
+  RateImage* img = acquireDynamicRateImage(*data, cmd, sw, sh, rateLayers);
   if (!img) {
     next(cmd, info);
     return;

@@ -115,7 +115,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vrsfov_vkCreateFramebuffer(
   // Depth-only passes have no colour output to make more or less sharp.
   const bool candidate =
       rp.hasColor && isEyeCandidateSize(pCreateInfo->width, pCreateInfo->height, snap);
-  RateImage* image = candidate ? acquireDynamicRateImage(*data, sw, sh, rateLayers)
+  RateImage* image = candidate ? acquireDynamicRateImage(*data, VK_NULL_HANDLE, sw, sh, rateLayers)
                                : acquireNeutralImage(*data, sw, sh);
   if (!image) {
     LOG_WARN("could not create a rate image for framebuffer %ux%u; leaving it unmodified",

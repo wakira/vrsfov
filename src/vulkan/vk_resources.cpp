@@ -5,6 +5,8 @@
 #include "common/log.h"
 #include "vulkan/vk_dispatch.h"
 
+#include <functional>
+
 namespace vrsfov {
 
 namespace {
@@ -105,11 +107,15 @@ bool createRateImage(DeviceData& data, uint32_t w, uint32_t h, uint32_t layers, 
   return true;
 }
 
-uint64_t rateImageKey(uint32_t w, uint32_t h, uint32_t layers) {
-  return ((uint64_t)w << 40) | ((uint64_t)h << 20) | layers;
-}
-
 }  // namespace
+
+size_t DynamicRateImageKeyHash::operator()(const DynamicRateImageKey& k) const {
+  size_t h = std::hash<uintptr_t>{}(reinterpret_cast<uintptr_t>(k.commandBuffer));
+  h ^= std::hash<uint32_t>{}(k.width) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+  h ^= std::hash<uint32_t>{}(k.height) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+  h ^= std::hash<uint32_t>{}(k.layers) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+  return h;
+}
 
 void Resources::destroyAll(DeviceDispatch& d, VkDevice device) {
   std::lock_guard<std::mutex> guard(lock);
@@ -129,10 +135,11 @@ void Resources::destroyAll(DeviceDispatch& d, VkDevice device) {
   neutral = nullptr;
 }
 
-RateImage* acquireDynamicRateImage(DeviceData& data, uint32_t w, uint32_t h, uint32_t layers) {
+RateImage* acquireDynamicRateImage(DeviceData& data, VkCommandBuffer commandBuffer, uint32_t w,
+                                   uint32_t h, uint32_t layers) {
   Resources& res = data.res;
   std::lock_guard<std::mutex> guard(res.lock);
-  const uint64_t key = rateImageKey(w, h, layers);
+  const DynamicRateImageKey key{commandBuffer, w, h, layers};
   auto it = res.dynamicRateImages.find(key);
   if (it != res.dynamicRateImages.end()) return it->second;
 

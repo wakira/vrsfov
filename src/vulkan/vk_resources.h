@@ -35,20 +35,37 @@ struct PatternBuffer {
   PatternKey key;
 };
 
+struct DynamicRateImageKey {
+  VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+  uint32_t width = 0, height = 0, layers = 1;
+  bool operator==(const DynamicRateImageKey& other) const {
+    return commandBuffer == other.commandBuffer && width == other.width &&
+           height == other.height && layers == other.layers;
+  }
+};
+
+struct DynamicRateImageKeyHash {
+  size_t operator()(const DynamicRateImageKey& k) const;
+};
+
 struct Resources {
   std::mutex lock;  // guards everything below
 
   std::vector<std::unique_ptr<RateImage>> images;
   std::vector<std::unique_ptr<PatternBuffer>> patterns;
-  std::unordered_map<uint64_t, RateImage*> dynamicRateImages;  // (w,h,layers)
+  // Per command buffer: a rate image shared by two command buffers can be
+  // overwritten before the first one executes, which shows up as a fixed or
+  // wrong-eye pattern in real games. Command buffers in a pool reuse theirs.
+  std::unordered_map<DynamicRateImageKey, RateImage*, DynamicRateImageKeyHash> dynamicRateImages;
   std::unordered_map<PatternKey, PatternBuffer*, PatternKeyHash> patternBuffers;
   RateImage* neutral = nullptr;
 
   void destroyAll(DeviceDispatch& d, VkDevice device);
 };
 
-// Cached per (w, h, layers), created on demand.
-RateImage* acquireDynamicRateImage(DeviceData& data, uint32_t w, uint32_t h, uint32_t layers);
+// Cached per (command buffer, w, h, layers), created on demand.
+RateImage* acquireDynamicRateImage(DeviceData& data, VkCommandBuffer commandBuffer, uint32_t w,
+                                   uint32_t h, uint32_t layers);
 // The shared all-zero image, grown on demand; never smaller than (w, h).
 RateImage* acquireNeutralImage(DeviceData& data, uint32_t w, uint32_t h);
 // Static foveation pattern for a region of ew x eh texels.
