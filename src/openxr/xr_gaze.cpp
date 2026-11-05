@@ -346,7 +346,20 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
   // projection in step 3 rather than the direction.
   bool openvrTracked = false;
   float openvrU[2] = {0.5f, 0.5f}, openvrV[2] = {0.5f, 0.5f};
-  if (!eyeTracked && envFlag("VRSFOV_OPENVR_GAZE")) {
+  // When the native OpenXR action worked and then drops out (some games do this
+  // when they enter actual gameplay), try SteamVR's own centre automatically.
+  // An explicit VRSFOV_OPENVR_GAZE=0 disables both the automatic and manual path.
+  const char* openvrSetting = getenv("VRSFOV_OPENVR_GAZE");
+  const bool openvrExplicitlyOff =
+      openvrSetting && *openvrSetting && !envFlag("VRSFOV_OPENVR_GAZE");
+  const bool openvrAuto = session.eyeTrackedLogged && !eyeTracked;
+  const bool wantOpenvr = !openvrExplicitlyOff &&
+                          (envFlag("VRSFOV_OPENVR_GAZE") || openvrAuto);
+  if (!eyeTracked && wantOpenvr) {
+    if (openvrAuto && !envFlag("VRSFOV_OPENVR_GAZE")) {
+      LOG_ONCE(INFO, "gaze-auto-openvr",
+               "native OpenXR gaze became inactive; trying the SteamVR OpenVR source");
+    }
     static bool prepared = false;
     static bool available = false;
     if (!prepared) {
