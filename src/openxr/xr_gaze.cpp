@@ -8,6 +8,7 @@
 #include "openxr/xr_dispatch.h"
 #include "openxr/xr_hooks.h"
 #include "common/openvr_gaze.h"
+#include "gaze/shm_gaze.h"
 #include "openxr/xr_pure.h"
 
 using namespace vrsfov;
@@ -387,6 +388,24 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
     }
   }
 
+  // Last resort: the out-of-process publisher. It is a separate SteamVR client,
+  // so it survives games that deactivate their in-process OpenXR action during
+  // gameplay (VTOL VR does exactly that).
+  bool publisherTracked = false;
+  if (!eyeTracked && !openvrTracked && !openvrExplicitlyOff) {
+    ShmGazeSample sample;
+    if (readShmGaze(sample)) {
+      openvrU[0] = sample.u0;
+      openvrV[0] = sample.v0;
+      openvrU[1] = sample.u1;
+      openvrV[1] = sample.v1;
+      openvrTracked = true;
+      publisherTracked = true;
+      LOG_ONCE(INFO, "gaze-publisher-active",
+               "using the out-of-process vrsfov-gaze publisher for eye tracking");
+    }
+  }
+
   if (!eyeTracked && !openvrTracked) {
     direction = fixedGazeDirection(config.fixedOffsetX, config.fixedOffsetY);
   }
@@ -394,8 +413,11 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
   const bool tracking = eyeTracked || openvrTracked;
   if (tracking != session.eyeTrackedLogged) {
     session.eyeTrackedLogged = tracking;
-    LOG_INFO("eye tracking %s", tracking ? (eyeTracked ? "active" : "active (OpenVR source)")
-                                        : "unavailable (using fixed foveation)");
+    LOG_INFO("eye tracking %s",
+             tracking ? (eyeTracked ? "active"
+                                    : (publisherTracked ? "active (publisher)"
+                                                        : "active (OpenVR source)"))
+                      : "unavailable (using fixed foveation)");
   }
 
   // 3. project into each eye image, smooth and publish.

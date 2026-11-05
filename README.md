@@ -286,6 +286,15 @@ INFO [vk] standalone gaze: eye tracking active (OpenVR source), centre left (0.6
 The snapshot carries the gaze per eye, so a per-eye or side-by-side target gets each
 eye's own centre and only a single-target pass uses their average.
 
+On PC, `run-pc.sh` also starts `build-pc/vrsfov-gaze` as an out-of-process
+fallback. Some games keep the OpenXR gaze action active in menus but report it
+inactive in gameplay; the layer then tries an in-process OpenVR client and, if
+that has no data, reads the publisher over `/dev/shm/vrsfov-gaze`. The publisher
+is a separate SteamVR client, so it is not tied to the game's OpenXR session.
+`VRSFOV_START_GAZE=0` stops the launcher from starting it; `VRSFOV_OPENVR_GAZE=0`
+disables both OpenVR fallbacks. If SteamVR is not in a standard location, set
+`VRSFOV_STEAMVR_DIR=/path/to/SteamVR/bin/linux64`.
+
 It is opt-in and off by default because it adds a second SteamVR client to the
 game's process; SteamVR may also refuse gaze to a secondary client, in which case
 the log says `GetEyeTrackedFoveationCenter=no data` and fixed foveation continues. The header is taken from the system (the dev shell sets

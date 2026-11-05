@@ -154,7 +154,8 @@ set(VRSFOV_LIB_SOURCES ${VRSFOV_COMMON_SOURCES} ${VRSFOV_VULKAN_SOURCES})
 if(VRSFOV_FRAME)
   list(APPEND VRSFOV_LIB_SOURCES src/gaze/frame_gaze.cpp)
 else()
-  list(APPEND VRSFOV_LIB_SOURCES ${VRSFOV_OPENXR_SOURCES} src/gaze/pc_gaze.cpp)
+  list(APPEND VRSFOV_LIB_SOURCES ${VRSFOV_OPENXR_SOURCES} src/gaze/pc_gaze.cpp
+       src/gaze/shm_gaze.cpp)
   if(VRSFOV_OPENVR_INCLUDE_DIR)
     list(APPEND VRSFOV_LIB_SOURCES src/common/openvr_gaze.cpp)
   endif()
@@ -217,9 +218,9 @@ elseif(NOT VRSFOV_FRAME)
   message(STATUS "vrsfov-overlay not built: OpenVR headers/library not found")
 endif()
 
-if(VRSFOV_FRAME AND VRSFOV_OPENVR_INCLUDE_DIR)
-  # The only component that talks to SteamVR on the Frame. The layer reads the
-  # /dev/shm record this process publishes.
+if(VRSFOV_OPENVR_INCLUDE_DIR)
+  # The only component that talks to SteamVR on the Frame, and the out-of-process
+  # fallback on PC. The layer reads the /dev/shm record this process publishes.
   add_executable(vrsfov-gaze
     tools/gaze/main.cpp
     src/common/openvr_gaze.cpp

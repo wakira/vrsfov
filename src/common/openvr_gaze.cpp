@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <unistd.h>
+
 #include <openvr/openvr.h>
 
 #include "common/gaze_math.h"
@@ -57,9 +59,36 @@ std::string steamVrDirFromMaps() {
     }
   }
   fclose(f);
-  if (found.empty()) return {};
-  const size_t slash = found.find_last_of('/');
-  return slash == std::string::npos ? std::string() : found.substr(0, slash);
+  if (!found.empty()) {
+    const size_t slash = found.find_last_of('/');
+    if (slash != std::string::npos) return found.substr(0, slash);
+  }
+
+  // Out-of-process publisher on PC: vrclient.so is not mapped in this process.
+  // Try an explicit directory first, then the usual SteamVR locations.
+  auto hasLibrary = [](const std::string& dir) {
+    return !dir.empty() && access((dir + "/libopenvr_api.so").c_str(), R_OK) == 0;
+  };
+  if (const char* dir = getenv("VRSFOV_STEAMVR_DIR")) {
+    if (hasLibrary(dir)) return dir;
+  }
+  const char* home = getenv("HOME");
+  const char* relative[] = {
+      "/.local/share/Steam/steamapps/common/SteamVR/bin/linux64",
+      "/.steam/steam/steamapps/common/SteamVR/bin/linux64",
+      "/.steam/root/steamapps/common/SteamVR/bin/linux64",
+  };
+  if (home) {
+    for (const char* rel : relative) {
+      const std::string dir = std::string(home) + rel;
+      if (hasLibrary(dir)) return dir;
+    }
+  }
+  for (const char* dir : {"/opt/steamvr/bin/linux64", "/opt/steamvr/bin/linuxarm64",
+                          "/usr/lib/steamvr", "/usr/lib64/steamvr"}) {
+    if (hasLibrary(dir)) return dir;
+  }
+  return {};
 }
 
 std::string initErrorText(vr::EVRInitError e) {
