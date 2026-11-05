@@ -609,10 +609,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vrsfov_vkCreateDevice(VkPhysicalDevice physicalDe
   if (data->active) {
     const Caps& c = data->caps;
     LOG_INFO("device %p ACTIVE: texel %u, rates inner %s middle %s outer %s (supported %zu), "
-             "layered=%d nonTrivialCombiners=%d dynamicRendering=%d",
+             "layered=%d nonTrivialCombiners=%d depthStencilWrites=%d sampleMask=%d "
+             "dynamicRendering=%d",
              reinterpret_cast<void*>(*pDevice), c.texel, rateToString(c.innerRate).c_str(),
              rateToString(c.middleRate).c_str(), rateToString(c.outerRate).c_str(),
              c.supportedRates.size(), (int)c.layeredAttachments, (int)c.nonTrivialCombiners,
+             (int)c.withDepthStencilWrites, (int)c.withSampleMask,
              (int)c.dynamicRenderingAvailable);
     if (instance && instance->d.GetPhysicalDeviceProperties) {
       VkPhysicalDeviceProperties props{};
