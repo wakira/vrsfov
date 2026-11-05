@@ -26,6 +26,7 @@ void logStatsAtExit() {
            (unsigned long long)s.passes.load(std::memory_order_relaxed),
            (unsigned long long)s.foveatedPasses.load(std::memory_order_relaxed),
            (unsigned long long)s.neutralPasses.load(std::memory_order_relaxed));
+  logPipelineStats();
 }
 
 std::once_flag g_statsAtExitOnce;

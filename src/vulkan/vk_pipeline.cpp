@@ -283,4 +283,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vrsfov_vkCreateGraphicsPipelines(
   VRSFOV_GUARD_END(VK_ERROR_INITIALIZATION_FAILED)
 }
 
+void logPipelineStats() {
+  const uint64_t total = g_pipelineStats.total.load(std::memory_order_relaxed);
+  if (total == 0) return;
+  LOG_INFO("pipeline injection: %llu pipelines - %llu with our 1x1 KEEP/MAX state, "
+           "%llu left at KEEP/KEEP for safety, %llu skipped (app dynamic state %llu, app FSR "
+           "state %llu, unmodified render pass %llu)",
+           (unsigned long long)total,
+           (unsigned long long)g_pipelineStats.injected.load(std::memory_order_relaxed),
+           (unsigned long long)g_pipelineStats.unsafe.load(std::memory_order_relaxed),
+           (unsigned long long)(g_pipelineStats.skipDynamicState.load(std::memory_order_relaxed) +
+                                g_pipelineStats.skipAppState.load(std::memory_order_relaxed) +
+                                g_pipelineStats.skipRenderPass.load(std::memory_order_relaxed)),
+           (unsigned long long)g_pipelineStats.skipDynamicState.load(std::memory_order_relaxed),
+           (unsigned long long)g_pipelineStats.skipAppState.load(std::memory_order_relaxed),
+           (unsigned long long)g_pipelineStats.skipRenderPass.load(std::memory_order_relaxed));
+}
+
 }  // namespace vrsfov

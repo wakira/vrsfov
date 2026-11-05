@@ -40,6 +40,8 @@ void vrsfovMaybeActivate(DeviceData& data);
 // no-op unless VRSFOV_OPENVR_GAZE is set.
 void updateStandaloneGaze(DeviceData& data);
 void vrsfovMaybeUpdateStandaloneGaze(DeviceData& data);
+// Diagnostics: log the cumulative pipeline-injection counts at process exit.
+void logPipelineStats();
 
 // ---- device level (vk_device.cpp) ----
 VKAPI_ATTR VkResult VKAPI_CALL vrsfov_vkCreateDevice(VkPhysicalDevice physicalDevice,
