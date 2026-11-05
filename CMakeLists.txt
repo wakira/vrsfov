@@ -248,14 +248,8 @@ if(NOT VRSFOV_FRAME)
     ${VRSFOV_XR_MANIFEST_DIR}/XrApiLayer_vrsfov.json @ONLY)
 endif()
 
-set(VRSFOV_TEST_HOME ${CMAKE_BINARY_DIR}/test-home)
-file(MAKE_DIRECTORY ${VRSFOV_TEST_HOME})
-
-include(GNUInstallDirs)
-install(TARGETS vrsfov LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/vrsfov)
-if(TARGET vrsfov-gaze)
-  install(TARGETS vrsfov-gaze RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-endif()
+# No install rules: the layer is used from the build tree with VK_LAYER_PATH /
+# XR_API_LAYER_PATH, so nothing is written to /usr or the user's layer dirs.
 
 # ---------------------------------------------------------------------------
 # Tests

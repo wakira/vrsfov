@@ -149,9 +149,8 @@ if(VRSFOV_BUILD_GPU_TESTS)
   endif()
 
 
-  # Layer loading is opt-in and configured through the environment. The layer
-  # must be findable by the loader: either installed (scripts/install-pc.sh) or via
-  # VK_LAYER_PATH pointing at the build directory.
+  # Layer loading is opt-in and configured through the environment. The layer is
+  # found through VK_LAYER_PATH pointing at the build's manifest directory.
   set(VRSFOV_GPU_TEST_ENV
     "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR}"
     "VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs"

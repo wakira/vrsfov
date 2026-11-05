@@ -1,7 +1,6 @@
 # vrsfov
 
-VRS-based foveated rendering for Linux VR, from one source tree with two
-build targets:
+VRS-based foveated rendering for Linux VR, two build targets:
 
 | Target | Artifact | What it does | Gaze source |
 |---|---|---|---|
@@ -25,29 +24,9 @@ The design is documented in [`plan/`](plan/) — start at
 [`plan/00-overview.md`](plan/00-overview.md). For details that the plan leaves
 open, the Vulkan/OpenXR specifications win.
 
-This tree replaces the earlier `xrfoveated`/`framefov` split. The names are a
-hard cut: only `VRSFOV_*` environment variables, `~/.config/vrsfov/settings.ini`
-and `~/.local/state/vrsfov/vrsfov.log` are read.
+`~/.config/vrsfov/settings.ini` and `~/.local/state/vrsfov/vrsfov.log` are read.
 
 ## Status
-
-| Milestone | State |
-|---|---|
-| M0 scaffolding (CMake, manifests, install, log/config/shared state, unit tests) | done |
-| M1 Vulkan passthrough layer (dispatch tables, GIPA/GDPA, lifecycle, tracking) | done |
-| M2 device activation (capabilities, extension/feature injection, rate clamping) | done |
-| M3 pure logic (pattern, classify, gaze projection, render-pass conversion, SPIR-V scan) | done |
-| M4 dynamic rendering path (rate images, pattern buffers, pipeline injection) | done |
-| M5 render pass path (v1/v2 conversion, imageless framebuffers, neutral image) | done |
-| M6 OpenXR layer (instance, session, swapchains, projection slots, recommended size) | done |
-| M7 fixed foveation end-to-end | done |
-| M8 eye tracking (gaze action set, pose, locate, projection, smoothing, fallback) | done |
-| M9 polish (hot reload, per-app/exe sections, stats logging, README, uninstall) | done |
-
-OpenXR gaze had a real layer bug: the layer created its action set but only suggested the
-eye-gaze binding when the app happened to suggest that profile. It now suggests its own
-binding, merges app suggestions, and drives the app's action when the app already owns the
-binding path.
 
 Everything runs on the machine it was developed on: RADV (RX 9070 XT), Mesa 26.x, Vulkan
 1.4. No headset was available, so the OpenXR half is verified against a **mock OpenXR runtime**
@@ -83,34 +62,40 @@ Without Nix, CMake fetches pinned `Vulkan-Headers` and `OpenXR-SDK` headers with
 | `VRSFOV_BUILD_TESTS` | `ON` | build the unit tests and register `ctest` entries |
 | `VRSFOV_BUILD_GPU_TESTS` | `ON` | build the headless GPU end-to-end test app |
 
-## Install
+## Run without installing
+
+There are no install scripts and no CMake install rules. The build tree is the
+install; the standard loader environment variables point at its manifests:
 
 ```sh
-scripts/install-pc.sh                 # user install: ~/.local, both layers
-scripts/install-pc.sh --system        # /usr, needed for Steam's pressure-vessel
-scripts/uninstall.sh --system
-scripts/dev-install.sh                # dev helper: sync the current build into the install
+# PC
+scripts/run-pc.sh ./my_vulkan_vr_app
+# Steam launch options:
+#   /absolute/path/to/vrsfov/scripts/run-pc.sh %command%
+
+# Steam Frame
+scripts/run-frame.sh ./game
+#   /absolute/path/to/vrsfov/scripts/run-frame.sh %command%
 ```
 
-Steam Frame:
+`run-pc.sh` sets:
 
 ```sh
-scripts/install-frame.sh build-frame  # layer, gaze publisher, systemd unit
-systemctl --user enable --now vrsfov-gaze
+VK_LAYER_PATH=$PWD/build-pc/manifests/vulkan
+VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs
+XR_API_LAYER_PATH=$PWD/build-pc/manifests/openxr
+XR_ENABLE_API_LAYERS=XR_APILAYER_VRSFOV_foveated_rendering
+PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1
+VRSFOV_ENABLE=1
 ```
 
-The PC manifests point at the identical absolute `libvrsfov.so` path, which
-is what makes the two halves share one `SharedState`. Everything is opt-in:
-
-```sh
-VRSFOV_ENABLE=1 ./my_vulkan_vr_app
-# Steam launch options:  VRSFOV_ENABLE=1 %command%
-```
-
-`VRSFOV_DISABLE=1` forces both layers off. Note that the Vulkan loader looks
-for implicit layer manifests in the **passwd home** directory (not `$HOME`), and
-that Steam's pressure-vessel container only imports host Vulkan layers, so a
-system install is recommended for Proton games.
+`run-frame.sh` sets only the Vulkan variables, `VRSFOV_ENABLE=1` and
+`VRSFOV_OPENVR_GAZE=1`, and starts `vrsfov-gaze` once if it is not already
+running (`VRSFOV_START_GAZE=0` disables that). Nothing is written to `/usr` or to
+the loader's implicit-layer directories. `VRSFOV_DISABLE=1` forces the layer off.
+The only files touched outside the build tree are the config
+(`~/.config/vrsfov/settings.ini`) and the log
+(`~/.local/state/vrsfov/vrsfov.log`).
 
 ## Steam Frame
 
@@ -119,15 +104,24 @@ The Frame target is the same Vulkan core without the OpenXR half:
 ```sh
 cmake -B build-frame -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=frame
 cmake --build build-frame
-scripts/install-frame.sh build-frame
-systemctl --user enable --now vrsfov-gaze
 ```
 
 Launch a game with:
 
 ```sh
+scripts/run-frame.sh %command%
+```
+
+or set the same variables by hand:
+
+```sh
+VK_LAYER_PATH=$PWD/build-frame/manifests/vulkan \
+VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs \
 VRSFOV_ENABLE=1 VRSFOV_OPENVR_GAZE=1 %command%
 ```
+
+Start `build-frame/vrsfov-gaze -q` once (or let `run-frame.sh` do it) if you do
+not already have a user service for it.
 
 `standalone = 1` is the compile-time default on this target, so no config edit is
 needed for a first run. `vrsfov-gaze` is the only process that talks to SteamVR;
@@ -481,7 +475,7 @@ and the loader unloaded it, failing *every* Vulkan instance creation in the proc
 (vrclient, wineopenxr and DXVK then all fail, and the game dies). This was a real bug
 (loaders and winevulkan ask for `vkCreateInstance` with an instance handle the layer has
 never seen); it is fixed and guarded by the `vk_layer_probe` test — make sure the
-installed library is current (`scripts/dev-install.sh`).
+build you are launching is current (`cmake --build build-pc`).
 
 Three switches let you bisect without editing code; use them one at a time (and
 add `DISABLE_LSFG=1` if you have the Lossless Scaling frame-generation layer
@@ -509,7 +503,7 @@ pipelines and every rate image update).
 | Symptom | Likely cause |
 |---|---|
 | nothing in the log for a game, no header line with the game's name | the layer was not enabled for that process: the game needs `VRSFOV_ENABLE=1` **in its own launch options** (verify with `grep "adding PID" ~/.steam/steam/logs/gameprocess_log.txt`, the command line is logged verbatim) |
-| nothing in the log, no `[vk]`/`[xr]` lines | the layer is not enabled or not found: `VRSFOV_ENABLE=1` must be set, the manifest must be installed (`scripts/install-pc.sh`), and for the Vulkan loader the manifest must be in the passwd home's `~/.local/share/vulkan/implicit_layer.d` (the loader ignores `$HOME`) |
+| nothing in the log, no `[vk]`/`[xr]` lines | the layer is not enabled or not found: launch through `scripts/run-pc.sh`, or set `VK_LAYER_PATH`/`VK_INSTANCE_LAYERS` and `XR_API_LAYER_PATH`/`XR_ENABLE_API_LAYERS` to the build's `manifests/` directories |
 | `layer inactive (no OpenXR instance)` | the `XrInstance` is created *after* the `VkDevice` but no instance exists at all yet (plain Vulkan app, or the app crashed before OpenXR init); `VRSFOV_FORCE_ACTIVE=1` forces the layer on for testing |
 | `device … capable but waiting for an OpenXR instance` | the `VkDevice` was created before the `XrInstance` (VTOL VR does this). Nothing is wrong: the device activates on the next command buffer once the instance appears, and only objects created before that stay unmodified. If it never activates, the app never created an instance — use `standalone = 1` + `eye_size` for it |
 | `layer inactive (VK_KHR_fragment_shading_rate not available)` | the device/driver has no attachment VRS (e.g. llvmpipe), or the app already uses NV shading rate image / EXT fragment density map |
@@ -519,7 +513,7 @@ pipelines and every rate image update).
 | layer foveates (`foveated` + `attaching` in the log) but the picture looks the same | expected on hardware whose rates are only `1x1`/`2x2`: the whole effect is "half resolution" in a region. Use `draw_radii = both` to see the radii as circles, and `debug_mode = 1`/`0` to A/B the maximum difference the device can produce. If even the `draw_radii` circles are invisible, check the `pipeline injection:` summary — the pipelines are probably not honouring the attachment |
 | `draw_radii` circles are visible but only in one eye | the target was classified as a single eye; the `classify` line says which (render area vs framebuffer, viewMask/layers) |
 | everything is blocky (`debug_mode = 1` left on) | set `debug_mode = 0` |
-| Steam/Proton game: no layer (nothing in the log with the game's name) | check the launch options first; then check that pressure-vessel imports the manifests: `~/.local/share/Steam/steamapps/common/SteamLinuxRuntime_*/pressure-vessel/bin/steam-runtime-system-info | grep -i vrsfov` (both halves should be listed). Install with `--system` if they are not |
+| Steam/Proton game: no layer (nothing in the log with the game's name) | launch the game through `scripts/run-pc.sh %command%` (or set the `VK_LAYER_PATH`/`VK_INSTANCE_LAYERS`/`XR_API_LAYER_PATH`/`XR_ENABLE_API_LAYERS` variables yourself); check that the build's `manifests/` paths are readable from inside the container |
 | Steam/Proton game starts but the fovea is not where the eye render is | the target-sizes are in the log at debug level (`render target WxH …`): set `eye_size` to what the game really renders, or omit `eye_size` to foveate every colour target |
 | the game exits within a second of launching | nothing to foveate yet: the layer only acts once the game creates its Vulkan device. Fix the game's startup first (anti-cheat, Proton version) |
 | validation complains about a pipeline/render pass combination | please report it with the log; the layer skips render passes it cannot modify and logs a WARN |
@@ -606,19 +600,12 @@ Verified on this machine:
   `/user/eyes_ext` and the `/user/eyes_ext/input/gaze_ext/pose` binding this layer suggests.
   Eye-tracked foveation therefore works with SteamVR whenever the HMD/driver actually
   reports gaze; otherwise the log says `eye tracking unavailable` and fixed foveation is used.
-- `steam-runtime-system-info` (pressure-vessel) lists **both** manifests of the *user*
-  install as importable, so Proton games inside the Steam Linux Runtime see both halves
-  (`ok: true`):
-
-  ```
-  vulkan.implicit_layers      VK_LAYER_VRSFOV_vrs  -> ~/.local/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json
-  openxr-1.implicit_layers    XR_APILAYER_VRSFOV_foveated_rendering
-                                                         -> ~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json
-  ```
-
-  If a Proton OpenXR title still misses the OpenXR layer, add
-  `PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1` (and `..._RUNTIMES=1` for the runtime) to the
-  launch options. Check with `~/.local/share/Steam/steamapps/common/SteamLinuxRuntime_sniper/pressure-vessel/bin/steam-runtime-system-info`.
+- Proton/pressure-vessel games get the layer from the same environment variables as
+  native apps; `scripts/run-pc.sh` sets `VK_LAYER_PATH`, `VK_INSTANCE_LAYERS`,
+  `XR_API_LAYER_PATH`, `XR_ENABLE_API_LAYERS` and
+  `PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1` before `%command%`. Nothing needs to be
+  copied into the container or installed under `/usr`. Check the loader's verdict with
+  `VK_LOADER_DEBUG=layer` / `XR_LOADER_DEBUG=all` in the launch options.
 - SteamVR's own processes (`vrserver`, `vrmonitor`, the compositor) load the Vulkan layer
   too but stay **inactive**: they never create an `XrInstance`, so their rendering is
   untouched.

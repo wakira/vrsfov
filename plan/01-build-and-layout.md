@@ -38,7 +38,7 @@ vrsfov/
     unit/                          # pure-function tests (doctest single header or plain asserts)
     vk_vrs_test/                   # GPU end-to-end test app (see 07)
   scripts/
-    install.sh / uninstall.sh
+    run-pc.sh / run-frame.sh
   README.md
 ```
 
@@ -119,16 +119,13 @@ next layer with the *original* arguments (fail open: the app must keep working).
 
 Both `library_path` values MUST be the identical absolute path (shared globals rely on it).
 
-## 5. Install locations
+## 5. Run locations (no install)
 
-User install (default of `scripts/install-pc.sh`, prefix `~/.local`):
-- library: `~/.local/lib/vrsfov/libvrsfov.so`
-- `~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json`
-- `~/.local/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json`
-- default config: `~/.config/vrsfov/settings.ini` (only if absent)
-
-System install (`--system`, prefix `/usr`): `/usr/lib/vrsfov/`, `/usr/share/openxr/1/...`,
-`/usr/share/vulkan/implicit_layer.d/`. Needed for Steam's pressure-vessel container, which
-imports host Vulkan layers but may not see `~/.local` OpenXR layers — document in README.
+The build tree is the install. The manifests stay under
+`build-pc/manifests/{vulkan,openxr}` (or `build-frame/manifests/vulkan`), and
+`scripts/run-pc.sh` / `run-frame.sh` set `VK_LAYER_PATH`, `VK_INSTANCE_LAYERS`,
+`XR_API_LAYER_PATH`, `XR_ENABLE_API_LAYERS` and `VRSFOV_ENABLE`.
+The config is `~/.config/vrsfov/settings.ini`; the log is
+`~/.local/state/vrsfov/vrsfov.log`. Nothing is written to `/usr`.
 
 Usage: `VRSFOV_ENABLE=1 ./app` or Steam launch options `VRSFOV_ENABLE=1 %command%`.

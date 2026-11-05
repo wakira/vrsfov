@@ -46,7 +46,7 @@ runtime's mirror window). Validation-clean.
 ✔ Runtime without the extension: graceful fallback to fixed (log INFO).
 
 **M9 — Polish.** Hot reload, per-app/exe sections, stats logging, README (install, usage,
-config reference, compatibility table, troubleshooting), uninstall script.
+config reference, compatibility table, troubleshooting), run-without-install scripts.
 
 ## GPU end-to-end test app (tests/vk_vrs_test)
 

@@ -35,7 +35,7 @@ headset or a real OpenXR runtime are verified against a **mock runtime** instead
 | M6 OpenXR passthrough + state | `M6-M8: OpenXR half` | `xr_layer_probe` (loader discovers and negotiates the layer), `xr_vk_e2e` (real session/swapchain/slots through a mock runtime: the Vulkan half foveates the registered swapchain image) |
 | M7 fixed foveation end-to-end | `M6-M8: OpenXR half` | `xr_vk_e2e`, and the `xr_vk_e2e_no_eye_gaze` variant: fixed foveation in the eye-image centre with a runtime without eye gaze |
 | M8 eye tracking | `M6-M8: OpenXR half` | `xr_vk_e2e`: the layer suggests its own gaze binding, merges app suggestions, attaches/syncs the action set, queries the pose and follows the runtime's gaze (0.25, 0.297 measured for a 0.25, 0.30 gaze); `xr_vk_e2e_no_app_gaze_suggest` covers an app that never mentions eye gaze, `xr_vk_e2e_app_owns_gaze_binding` an app that owns the binding path; fallback path as above |
-| M9 polish | `M6-M8` + this commit | config hot reload (`xrWaitFrame`, mtime + generation), `[exe:a,b]`/cmdline-token matching, 5-second stats report in `xrEndFrame`, README, `uninstall.sh` |
+| M9 polish | `M6-M8` + this commit | config hot reload (`xrWaitFrame`, mtime + generation), `[exe:a,b]`/cmdline-token matching, 5-second stats report in `xrEndFrame`, README, run scripts |
 | M10 standalone fixed foveation (not in the original plan) | `standalone mode` | `vk_vrs_test_standalone_env`, `vk_vrs_test_standalone_file`, `standalone_hot_reload`: a Vulkan-only process with no `XrInstance` gets the foveated pattern from `standalone = 1` + `eye_size = WxH`; a mismatched size stays neutral; rewriting the config during rendering is picked up |
 
 Current test suite: the PC target runs 18 entries (unit tests, 6 GPU modes, 5 end-to-end
@@ -71,11 +71,9 @@ run here. That is the remaining gap versus the plan's "hello_xr on a runtime" cr
 
 ## Deviations from the plan (and why)
 
-1. **Loader layer discovery (M1/M4 test infrastructure).** The Vulkan loader resolves the user
-   implicit-layer directory from the *passwd* home directory, not `$HOME`, so a private `HOME` cannot
-   be used to hide the installed layer. The GPU tests therefore rely on the installed layer
-   (`scripts/install-pc.sh`) and additionally set `VK_LAYER_PATH=<build dir>`; `scripts/dev-install.sh`
-   syncs a fresh build into the install. `tests/CMakeLists.txt` sets these variables per ctest entry.
+1. **Loader layer discovery (M1/M4 test infrastructure).** The tests are self-contained: they point
+   the Vulkan loader at the build's `manifests/vulkan` with `VK_LAYER_PATH` + `VK_INSTANCE_LAYERS`,
+   and the OpenXR loader at `manifests/openxr` with `XR_API_LAYER_PATH`. Nothing has to be installed.
    The end-to-end test additionally dlopens the exact library the loader loaded (found in
    `/proc/self/maps`), which also verifies the "one .so, shared globals" assumption of the design.
 2. **`VRSFOV_FAKE_GAZE=u,v`** added next to the planned `VRSFOV_FAKE_EYE=WxH`, and
@@ -208,5 +206,5 @@ run here. That is the remaining gap versus the plan's "hello_xr on a runtime" cr
 26. **Self-contained tests and build tree layout.** The Vulkan and OpenXR manifests are generated into
     `build/manifests/vulkan` and `build/manifests/openxr`; GPU tests set
     `VK_LAYER_PATH`/`VK_INSTANCE_LAYERS`, `xr_layer_probe` sets `XR_API_LAYER_PATH`, and the hot-reload
-    script takes the binary path from `VRSFOV_TEST_BIN`. No test depends on `scripts/install-pc.sh`
-    having been run, and the Vulkan loader no longer warns about the OpenXR manifest in its path.
+    script takes the binary path from `VRSFOV_TEST_BIN`. No test depends on an installed layer, and
+    the Vulkan loader no longer warns about the OpenXR manifest in its path.

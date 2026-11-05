@@ -16,12 +16,13 @@ set -uo pipefail
 appid="${1:?usage: steam-game-check.sh <appid> [extra VAR=VAL ...]}"
 shift || true
 extra="$*"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-opts="DISABLE_LSFG=1 VRSFOV_ENABLE=1 VRSFOV_LOG_STDERR=1 VRSFOV_LOG_LEVEL=debug"
+opts="DISABLE_LSFG=1 VRSFOV_LOG_STDERR=1 VRSFOV_LOG_LEVEL=debug"
 opts="$opts VK_LOADER_DEBUG=error,warn,layer PROTON_LOG=1"
 opts="$opts WINE_CPU_TOPOLOGY=8:8,9,10,11,12,13,14,15"
 [[ -n "$extra" ]] && opts="$opts $extra"
-opts="$opts %command%"
+opts="$opts $here/scripts/run-pc.sh %command%"
 
 cat <<EOF
 == Launch options for app $appid (paste these into Steam):
@@ -30,10 +31,7 @@ cat <<EOF
 
    Variants worth trying afterwards, one at a time:
      ... VRSFOV_DISABLE_VK=1 VRSFOV_DISABLE_XR=1   (layers loaded, inert)
-     ... VK_LOADER_LAYERS_DISABLE=VK_LAYER_VRSFOV_vrs    (OpenXR half only)
-   (for "Vulkan half only", move the OpenXR manifest aside first:
-      mv ~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json{,.off}
-    and move it back afterwards.)
+     ... VRSFOV_DISABLE_XR=1                          (Vulkan half only)
 
 == Watching logs now; start the game in Steam.
 EOF
