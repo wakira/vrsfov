@@ -193,7 +193,11 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
           r.y = slot.y;
           r.w = (uint32_t)std::max(0, slot.w);
           r.h = (uint32_t)std::max(0, slot.h);
-          if (target.viewMask != 0 && rateLayers == 1) {
+          // One rate image layer is shared by every layer of a layered pass
+          // when the device has no layeredShadingRateAttachments. In that case
+          // a per-eye pattern is impossible, so use the average instead of
+          // silently applying the left eye to both.
+          if (rateLayers == 1 && (target.viewMask != 0 || target.layers > 1)) {
             const EyeGaze avg = averageGaze(eyes);
             r.u = avg.u;
             r.v = avg.v;
