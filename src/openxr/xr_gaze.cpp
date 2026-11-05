@@ -1,5 +1,6 @@
 // Eye gaze interaction: action set attachment, action sync, action system
 // merging and the gaze -> snapshot update (03 §4-§5).
+#include <algorithm>
 #include <vector>
 
 #include "common/guard.h"
@@ -399,9 +400,13 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
                       : projectGaze(direction, quatFromXr(session.eyes[i].pose.orientation),
                                     fovTanFromXr(session.eyes[i].fov));
     const float projectedV = config.gazeYFlip ? 1.f - projected.v : projected.v;
-    session.smoothU[i] = smoothGazeSample(session.smoothU[i], projected.u, config.smoothing,
+    const float projectedU =
+        std::min(1.f, std::max(0.f, projected.u + config.gazeOffsetX));
+    const float offsetV =
+        std::min(1.f, std::max(0.f, projectedV + config.gazeOffsetY));
+    session.smoothU[i] = smoothGazeSample(session.smoothU[i], projectedU, config.smoothing,
                                           &session.haveSmoothU[i]);
-    session.smoothV[i] = smoothGazeSample(session.smoothV[i], projectedV, config.smoothing,
+    session.smoothV[i] = smoothGazeSample(session.smoothV[i], offsetV, config.smoothing,
                                           &session.haveSmoothV[i]);
     u[i] = session.smoothU[i];
     v[i] = session.smoothV[i];

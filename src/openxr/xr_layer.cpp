@@ -22,22 +22,40 @@ xrNegotiateLoaderApiLayerInterface(const XrNegotiateLoaderInfo* loaderInfo, cons
                                    XrNegotiateApiLayerRequest* request) {
   log::init();
   LOG_INFO("OpenXR layer negotiation requested (layer '%s')", layerName ? layerName : "");
-  if (!loaderInfo || !request) return XR_ERROR_INITIALIZATION_FAILED;
+  if (!loaderInfo || !request) {
+    LOG_WARN("OpenXR layer negotiation: missing loader info/request");
+    return XR_ERROR_INITIALIZATION_FAILED;
+  }
   if (loaderInfo->structType != XR_LOADER_INTERFACE_STRUCT_LOADER_INFO) {
+    LOG_WARN("OpenXR layer negotiation: structType %u", (unsigned)loaderInfo->structType);
     return XR_ERROR_INITIALIZATION_FAILED;
   }
   if (loaderInfo->structVersion != XR_LOADER_INFO_STRUCT_VERSION) {
+    LOG_WARN("OpenXR layer negotiation: structVersion %u (want %u)",
+             (unsigned)loaderInfo->structVersion, (unsigned)XR_LOADER_INFO_STRUCT_VERSION);
     return XR_ERROR_INITIALIZATION_FAILED;
   }
   if (loaderInfo->structSize != sizeof(XrNegotiateLoaderInfo)) {
+    LOG_WARN("OpenXR layer negotiation: structSize %u (want %zu)",
+             (unsigned)loaderInfo->structSize, sizeof(XrNegotiateLoaderInfo));
     return XR_ERROR_INITIALIZATION_FAILED;
   }
   if (!(loaderInfo->minInterfaceVersion <= XR_CURRENT_LOADER_API_LAYER_VERSION &&
         loaderInfo->maxInterfaceVersion >= XR_CURRENT_LOADER_API_LAYER_VERSION)) {
+    LOG_WARN("OpenXR layer negotiation: interface range %u..%u (want %u)",
+             (unsigned)loaderInfo->minInterfaceVersion,
+             (unsigned)loaderInfo->maxInterfaceVersion,
+             (unsigned)XR_CURRENT_LOADER_API_LAYER_VERSION);
     return XR_ERROR_INITIALIZATION_FAILED;
   }
   if (!(loaderInfo->minApiVersion <= XR_CURRENT_API_VERSION &&
         loaderInfo->maxApiVersion >= XR_CURRENT_API_VERSION)) {
+    LOG_WARN("OpenXR layer negotiation: API range %u.%u.%u..%u.%u.%u (want %u.%u.%u)",
+             XR_VERSION_MAJOR(loaderInfo->minApiVersion), XR_VERSION_MINOR(loaderInfo->minApiVersion),
+             XR_VERSION_PATCH(loaderInfo->minApiVersion), XR_VERSION_MAJOR(loaderInfo->maxApiVersion),
+             XR_VERSION_MINOR(loaderInfo->maxApiVersion), XR_VERSION_PATCH(loaderInfo->maxApiVersion),
+             XR_VERSION_MAJOR(XR_CURRENT_API_VERSION), XR_VERSION_MINOR(XR_CURRENT_API_VERSION),
+             XR_VERSION_PATCH(XR_CURRENT_API_VERSION));
     return XR_ERROR_INITIALIZATION_FAILED;
   }
 

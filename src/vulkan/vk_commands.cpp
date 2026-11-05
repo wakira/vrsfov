@@ -114,6 +114,11 @@ void recordRateUpdate(VkCommandBuffer cmd, DeviceData& data, RateImage& img,
       if (!gazeCopyRegion(r.x, r.y, r.w, r.h, r.layer, t, img.width, img.height, r.u, r.v, cr)) {
         continue;
       }
+      LOG_ONCE(DEBUG, "rate-update-first",
+               "first rate update: region layer %u rect (%d,%d) %ux%u gaze (%.3f,%.3f) -> "
+               "image (%d,%d) %ux%u, source (%u,%u) of %ux%u",
+               r.layer, r.x, r.y, r.w, r.h, (double)r.u, (double)r.v, cr.imageX, cr.imageY,
+               cr.imageW, cr.imageH, cr.srcX, cr.srcY, 2 * cr.imageW, 2 * cr.imageH);
       const PatternBuffer* pattern = acquirePattern(data, cr.imageW, cr.imageH, eyeTracked, config);
       if (!pattern) continue;
       if (pattern != current) {

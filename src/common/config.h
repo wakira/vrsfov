@@ -35,6 +35,10 @@ struct Config {
   Rate innerRate{1, 1}, middleRate{2, 2}, outerRate{2, 2};
   float horizontalScale = 1.03f;
   float fixedOffsetX = 0.0f, fixedOffsetY = 0.0f;  // fixed-mode gaze offset, tangent units
+  // Calibration in normalized eye-image units, applied after projection (and
+  // after gaze_yflip) to all sources. Useful when a runtime/compositor places
+  // the eye image's principal point away from the geometric centre.
+  float gazeOffsetX = 0.0f, gazeOffsetY = 0.0f;
   float smoothing = 0.0f;                          // 0 = none, 0.9 = heavy (EMA factor)
   // Some stacks present the eye image flipped vertically relative to the gaze
   // convention (composition flip). Mirror v after projection.

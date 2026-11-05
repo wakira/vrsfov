@@ -2,6 +2,7 @@
 // from libopenvr_api.so in the game's process.
 #include "vulkan/vk_dispatch.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "common/log.h"
@@ -40,6 +41,10 @@ void updateStandaloneGaze(DeviceData& data) {
     v0 = 1.f - v0;
     v1 = 1.f - v1;
   }
+  u0 = std::min(1.f, std::max(0.f, u0 + data.localConfig.gazeOffsetX));
+  u1 = std::min(1.f, std::max(0.f, u1 + data.localConfig.gazeOffsetX));
+  v0 = std::min(1.f, std::max(0.f, v0 + data.localConfig.gazeOffsetY));
+  v1 = std::min(1.f, std::max(0.f, v1 + data.localConfig.gazeOffsetY));
 
   // Per-eye EMA. A jump larger than 0.15 restarts the filter instead of dragging
   // the fovea across the image for seconds.

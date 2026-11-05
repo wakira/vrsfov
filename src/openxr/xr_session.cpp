@@ -506,6 +506,11 @@ XRAPI_ATTR XrResult XRAPI_CALL vrsfov_xrEndFrame(XrSession session,
         if (!same) {
           snap.slots = published;
           LOG_DEBUG("projection slots: %zu view(s) published", slots.size());
+          for (const ProjectionSlot& slot : slots) {
+            LOG_DEBUG("  slot: swapchain 0x%llx array %u eye %u rect (%d,%d) %dx%d",
+                      (unsigned long long)slot.swapchain, slot.arrayIndex, slot.eye, slot.x,
+                      slot.y, slot.w, slot.h);
+          }
         }
         ++snap.frameIndex;
       });
