@@ -76,13 +76,21 @@ std::string steamVrDirFromMaps() {
     if (hasLibrary(dir)) return dir;
   }
   const char* home = getenv("HOME");
+#if defined(__aarch64__) || defined(_M_ARM64)
+#define VRSFOV_STEAMVR_PRIMARY_BIN "linuxarm64"
+#define VRSFOV_STEAMVR_SECONDARY_BIN "linux64"
+#else
+#define VRSFOV_STEAMVR_PRIMARY_BIN "linux64"
+#define VRSFOV_STEAMVR_SECONDARY_BIN "linuxarm64"
+#endif
+
   const char* relative[] = {
-      "/.local/share/Steam/steamapps/common/SteamVR/bin/linux64",
-      "/.local/share/Steam/steamapps/common/SteamVR/bin/linuxarm64",
-      "/.steam/steam/steamapps/common/SteamVR/bin/linux64",
-      "/.steam/steam/steamapps/common/SteamVR/bin/linuxarm64",
-      "/.steam/root/steamapps/common/SteamVR/bin/linux64",
-      "/.steam/root/steamapps/common/SteamVR/bin/linuxarm64",
+      "/.local/share/Steam/steamapps/common/SteamVR/bin/" VRSFOV_STEAMVR_PRIMARY_BIN,
+      "/.local/share/Steam/steamapps/common/SteamVR/bin/" VRSFOV_STEAMVR_SECONDARY_BIN,
+      "/.steam/steam/steamapps/common/SteamVR/bin/" VRSFOV_STEAMVR_PRIMARY_BIN,
+      "/.steam/steam/steamapps/common/SteamVR/bin/" VRSFOV_STEAMVR_SECONDARY_BIN,
+      "/.steam/root/steamapps/common/SteamVR/bin/" VRSFOV_STEAMVR_PRIMARY_BIN,
+      "/.steam/root/steamapps/common/SteamVR/bin/" VRSFOV_STEAMVR_SECONDARY_BIN,
   };
   if (home) {
     for (const char* rel : relative) {
@@ -90,10 +98,13 @@ std::string steamVrDirFromMaps() {
       if (hasLibrary(dir)) return dir;
     }
   }
-  for (const char* dir : {"/opt/steamvr/bin/linux64", "/opt/steamvr/bin/linuxarm64",
+  for (const char* dir : {"/opt/steamvr/bin/" VRSFOV_STEAMVR_PRIMARY_BIN,
+                          "/opt/steamvr/bin/" VRSFOV_STEAMVR_SECONDARY_BIN,
                           "/usr/lib/steamvr", "/usr/lib64/steamvr"}) {
     if (hasLibrary(dir)) return dir;
   }
+#undef VRSFOV_STEAMVR_PRIMARY_BIN
+#undef VRSFOV_STEAMVR_SECONDARY_BIN
   return {};
 }
 
@@ -140,7 +151,8 @@ bool openvrGazePrepare(std::string& report) {
   const std::string libPath = dir + "/libopenvr_api.so";
   g_library = dlopen(libPath.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!g_library) {
-    g_report = "cannot load " + libPath + ": " + (dlerror() ? dlerror() : "?");
+    const char* errMsg = dlerror();
+    g_report = "cannot load " + libPath + ": " + (errMsg ? errMsg : "?");
     report = g_report;
     resetClient();
     return false;
