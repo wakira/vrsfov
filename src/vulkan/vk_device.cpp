@@ -50,6 +50,7 @@ void resolveDeviceDispatch(DeviceData& data) {
   VRSFOV_RESOLVE(BindImageMemory, "vkBindImageMemory");
   VRSFOV_RESOLVE(BindBufferMemory, "vkBindBufferMemory");
   VRSFOV_RESOLVE(MapMemory, "vkMapMemory");
+  VRSFOV_RESOLVE(FlushMappedMemoryRanges, "vkFlushMappedMemoryRanges");
   VRSFOV_RESOLVE(GetImageMemoryRequirements, "vkGetImageMemoryRequirements");
   VRSFOV_RESOLVE(GetBufferMemoryRequirements, "vkGetBufferMemoryRequirements");
   VRSFOV_RESOLVE(CreateRenderPass, "vkCreateRenderPass");

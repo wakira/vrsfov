@@ -52,6 +52,7 @@ struct DeviceDispatch {
   PFN_vkBindImageMemory BindImageMemory = nullptr;
   PFN_vkBindBufferMemory BindBufferMemory = nullptr;
   PFN_vkMapMemory MapMemory = nullptr;
+  PFN_vkFlushMappedMemoryRanges FlushMappedMemoryRanges = nullptr;
   PFN_vkGetImageMemoryRequirements GetImageMemoryRequirements = nullptr;
   PFN_vkGetBufferMemoryRequirements GetBufferMemoryRequirements = nullptr;
 

@@ -191,4 +191,5 @@ Logs are appended to `$XDG_STATE_HOME/vrsfov/vrsfov.log` (default `~/.local/stat
 ## Limitations
 
 - **RADV**: `maxFragmentShadingRateAttachmentTexelSize` is `8x8` and supported rates are `1x1`, `1x2`, `2x1`, `2x2` (`4x4` clamps to `2x2`). `layeredShadingRateAttachments` is unsupported on RADV, so multiview passes share a single-layer rate image.
+- **Turnip (Steam Frame, Adreno 750)**: verified, including the GPU test suite. Turnip does not make `vkCmdCopyBufferToImage` writes visible to the fragment-shading-rate attachment when the dependency is expressed with `VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR` alone (only the tail of the rate image was visible), so the layer hands the rate image over with a conservative `TRANSFER -> ALL_GRAPHICS` barrier.
 - **Scope**: Only Vulkan apps (including D3D11/D3D12 via DXVK/vkd3d-proton) are supported. OpenGL apps and apps already using VRS/FDM or `VK_EXT_shader_object` are left untouched.

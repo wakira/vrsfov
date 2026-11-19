@@ -922,6 +922,16 @@ int main(int argc, char** argv) {
     const bool gazeInjected = getenv("VRSFOV_FAKE_GAZE") != nullptr;
     report = analyze(pixels, width, height, texel, neutralExpected, !gazeInjected);
     printMap(report);
+    // Debug aid: dump the raw read-back (PGM) so a driver-specific pattern can
+    // be inspected off-device.
+    if (const char* dumpPath = getenv("VRSFOV_DUMP_MAP")) {
+      if (FILE* f = fopen(dumpPath, "wb")) {
+        fprintf(f, "P5\n%u %u\n255\n", width, height);
+        fwrite(pixels, 1, (size_t)width * height * layers, f);
+        fclose(f);
+        printf("  read-back dumped to %s (%ux%u x%u)\n", dumpPath, width, height, layers);
+      }
+    }
 
     if (multiview) {
       const uint8_t* layer1 = pixels + (size_t)width * height;

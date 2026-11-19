@@ -191,9 +191,8 @@ const PatternBuffer* acquirePattern(DeviceData& data, uint32_t ew, uint32_t eh, 
   }
   const PatternParams params = makePatternParams(config, caps.innerRate, caps.middleRate,
                                                  caps.outerRate, eyeTracked, &supported);
-  const std::vector<uint8_t> bytes = buildPattern(ew, eh, params);
+  std::vector<uint8_t> bytes = buildPattern(ew, eh, params);
   if (bytes.empty()) return nullptr;
-
   if (config.drawRadii) {
     // Say which rates the radii circles ended up using: on hardware whose
     // supported set has no rate that differs from both zones (for example only
@@ -259,6 +258,18 @@ const PatternBuffer* acquirePattern(DeviceData& data, uint32_t ew, uint32_t eh, 
   }
   memcpy(mapped, bytes.data(), bytes.size());
   pb->mapped = static_cast<const uint8_t*>(mapped);
+  // The pattern buffer asks for host-coherent memory, but pickMemoryType() falls
+  // back to any usable host-visible type. Flush explicitly so the GPU never sees
+  // stale bytes (Turnip on the Steam Frame served only part of a 64 KiB memcpy
+  // until this was added).
+  if (d.FlushMappedMemoryRanges) {
+    VkMappedMemoryRange range{};
+    range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    range.memory = pb->memory;
+    range.offset = 0;
+    range.size = VK_WHOLE_SIZE;
+    d.FlushMappedMemoryRanges(data.device, 1, &range);
+  }
 
   PatternBuffer* raw = pb.get();
   res.patterns.push_back(std::move(pb));

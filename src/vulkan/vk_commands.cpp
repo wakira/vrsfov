@@ -66,6 +66,27 @@ bool regionCoversAll(const Region& r, uint32_t texel, const RateImage& img) {
   return cr.imageX == 0 && cr.imageY == 0 && cr.imageW == img.width && cr.imageH == img.height;
 }
 
+// Hands the rate image over in FSR_OPTIMAL once its writes are complete.
+//
+// The destination stage is ALL_GRAPHICS plus the fragment shading rate
+// attachment stage, and the access masks include the generic memory
+// read/write bits, on purpose. Turnip (Steam Frame, Adreno 750) does not make
+// the transfer writes visible to the attachment read when the dependency is
+// expressed with VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR
+// alone: only the tail of the rate image became visible and the top stayed at
+// its previous (cleared) content, which put the fovea in the wrong place. The
+// wider barrier is conservative, valid, and costs nothing in practice.
+void rateImageReadyBarrier(VkCommandBuffer cmd, DeviceData& data, RateImage& img) {
+  imageBarrier(cmd, data, img.image, img.layers, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR,
+               VK_PIPELINE_STAGE_TRANSFER_BIT,
+               VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+               VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT |
+                   VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR,
+               VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR |
+                   VK_ACCESS_MEMORY_READ_BIT);
+}
+
 // 05 §5.1: transition, clear when needed, copy the static pattern windows, and
 // hand the image over in FSR_OPTIMAL. Transfer commands only.
 void recordRateUpdate(VkCommandBuffer cmd, DeviceData& data, RateImage& img,
@@ -132,11 +153,7 @@ void recordRateUpdate(VkCommandBuffer cmd, DeviceData& data, RateImage& img,
     flush();
   }
 
-  imageBarrier(cmd, data, img.image, img.layers, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-               VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR,
-               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-               VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR,
-               VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR);
+  rateImageReadyBarrier(cmd, data, img);
 }
 
 // 05 §5.3: the shared neutral image must contain zeros before it is used as an
@@ -150,11 +167,7 @@ void ensureNeutralInitialized(VkCommandBuffer cmd, DeviceData& data, CmdState& s
                VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR, 0,
                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
   clearRateImage(cmd, data, img);
-  imageBarrier(cmd, data, img.image, img.layers, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-               VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR,
-               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-               VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR,
-               VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR);
+  rateImageReadyBarrier(cmd, data, img);
   state.neutralInitialized = true;
   state.neutralInitImage = img.image;
 }
