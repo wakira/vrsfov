@@ -27,8 +27,12 @@ struct GraphicsBindingInfo {
 // XrGraphicsBindingVulkan2KHR) in a session create info pNext chain.
 GraphicsBindingInfo findVulkanBinding(const void* pNext);
 
-// 03 §6: the projection slots of the first two-view projection layer.
-bool extractProjectionSlots(const XrFrameEndInfo& info, SlotList& out);
+// 03 §6: the projection slots of the first two-view projection layer. When
+// `views` is given, it receives the fov and orientation the app submitted for
+// each view (index 0 left, 1 right): the image -> display mapping the compositor
+// will use.
+bool extractProjectionSlots(const XrFrameEndInfo& info, SlotList& out,
+                            SubmittedView views[2] = nullptr);
 
 // 03 §4: the eye gaze profile and the gaze pose binding paths.
 struct EyeGazePaths {

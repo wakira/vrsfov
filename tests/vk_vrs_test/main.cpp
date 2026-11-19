@@ -606,7 +606,7 @@ int main(int argc, char** argv) {
     } else if (arg == "--help" || arg == "-h") {
       printf("usage: %s [mode] [--chain-features] [--api-1.2] [--coverage] [--frames=N] "
              "[--no-validation] [-v]\n", argv[0]);
-      printf("modes: dynamic dynamic-chain rp1 rp2 multiview imageless nonEyeSize\n");
+      printf("modes: dynamic dynamic-chain rp1 rp2 multiview imageless nonEyeSize layers2\n");
       return 0;
     } else if (arg.rfind("--", 0) == 0) {
       fprintf(stderr, "unknown option %s\n", arg.c_str());
@@ -626,12 +626,15 @@ int main(int argc, char** argv) {
 
   const bool neutralExpected = (opt.mode == "nonEyeSize");
   const bool multiview = (opt.mode == "multiview");
-  const bool dynamicMode = (opt.mode == "dynamic" || opt.mode == "dynamic-chain");
+  // Multiview off, two layers: both eyes in one layered target (VTOL VR).
+  const bool layeredMode = (opt.mode == "layers2");
+  const bool dynamicMode =
+      (opt.mode == "dynamic" || opt.mode == "dynamic-chain" || layeredMode);
   const bool imageless = (opt.mode == "imageless");
 
   uint32_t width = neutralExpected ? 512 : 1024;
   uint32_t height = neutralExpected ? 256 : 1024;
-  const uint32_t layers = multiview ? 2 : 1;
+  const uint32_t layers = (multiview || layeredMode) ? 2 : 1;
 
   Target target = createTarget(dev, width, height, layers);
   Buffer readback = createReadbackBuffer(dev, (VkDeviceSize)width * height * layers);
@@ -820,11 +823,19 @@ int main(int argc, char** argv) {
       color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
       color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
       color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-      color.clearValue = {{{0, 0, 0, 0}}};
+      if (layeredMode) {
+        // The shader does not write gl_Layer, so only layer 0 is drawn. Clear to
+        // a known non-zero rate code: layer 1 then shows 1 everywhere except
+        // inside the painted gaze box, which is how the paint test tells a
+        // painted layer apart from an untouched one.
+        color.clearValue.color.uint32[0] = 1;
+      } else {
+        color.clearValue = {{{0, 0, 0, 0}}};
+      }
       VkRenderingInfo ri{};
       ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
       ri.renderArea = {{0, 0}, {width, height}};
-      ri.layerCount = 1;
+      ri.layerCount = layeredMode ? 2 : 1;
       ri.colorAttachmentCount = 1;
       ri.pColorAttachments = &color;
       pfnBeginRendering(cmd, &ri);
@@ -974,6 +985,32 @@ int main(int argc, char** argv) {
             report.ok = false;
           }
         }
+      }
+    }
+    // paint_gaze on a layered target without multiview (VTOL VR): one region is
+    // foveated and shared by both layers, but the debug marker must be painted
+    // into both layers, not just the left eye. debug_mode=1 puts every texel at
+    // the coarse rate, so only the cleared box reads back as 0.
+    if (layeredMode && getenv("VRSFOV_EXPECT_PAINT") && !neutralExpected) {
+      const uint8_t* layer1 = pixels + (size_t)width * height;
+      const uint32_t cx = width / 2, cy = height / 2;
+      const uint8_t c0 = pixels[(size_t)cy * width + cx];
+      const uint8_t c1 = layer1[(size_t)cy * width + cx];
+      const uint8_t k0 = pixels[0];
+      const uint8_t k1 = layer1[0];
+      printf("  paint: layer 0 center %d corner %d, layer 1 center %d corner %d\n", (int)c0,
+             (int)k0, (int)c1, (int)k1);
+      // Code 1 is the layered clear value, i.e. "never painted"; the exact code a
+      // clear writes depends on the format (this test target is R8_UINT), so any
+      // other value means the box was painted into that layer.
+      if (c0 == 1 || c1 == 1) {
+        printf("  expected the painted gaze box in both layers\n");
+        report.ok = false;
+      }
+      if (k0 == 0 || k1 != 1) {
+        printf("  expected the corner outside the box to keep its rate in both layers "
+               "(layer 1 clears to 1)\n");
+        report.ok = false;
       }
     }
   }

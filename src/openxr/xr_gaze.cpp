@@ -1,5 +1,6 @@
 // Eye gaze interaction: action set attachment, action sync, action system
 // merging and the gaze -> snapshot update (03 §4-§5).
+#include <atomic>
 #include <vector>
 
 #include "common/guard.h"
@@ -7,8 +8,6 @@
 #include "common/shared_state.h"
 #include "openxr/xr_dispatch.h"
 #include "openxr/xr_hooks.h"
-#include "common/openvr_gaze.h"
-#include "gaze/shm_gaze.h"
 #include "openxr/xr_pure.h"
 
 using namespace vrsfov;
@@ -341,103 +340,43 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
   }
   session.syncedSinceLastGaze = false;
 
-  // SteamVR-native sources. The publisher is a separate process and is the
-  // preferred one: running an in-process OpenVR client at the same time as the
-  // publisher connects two extra clients to SteamVR and can confuse VRLink's
-  // eye tracking. Use the publisher when it exists; otherwise the in-process
-  // client is the fallback.
-  bool openvrTracked = false;
-  bool publisherTracked = false;
-  float openvrU[2] = {0.5f, 0.5f}, openvrV[2] = {0.5f, 0.5f};
-  const char* openvrSetting = getenv("VRSFOV_OPENVR_GAZE");
-  const bool openvrExplicitlyOff =
-      openvrSetting && *openvrSetting && !envFlag("VRSFOV_OPENVR_GAZE");
-  const bool openvrAuto = session.eyeTrackedLogged && !eyeTracked;
-  const bool wantOpenvr = !openvrExplicitlyOff &&
-                          (envFlag("VRSFOV_OPENVR_GAZE") || openvrAuto);
-  const bool publisherPresent = shmGazePublisherPresent();
-
-  if (!eyeTracked && publisherPresent) {
-    ShmGazeSample sample;
-    if (readShmGaze(sample)) {
-      openvrU[0] = sample.u0;
-      openvrV[0] = sample.v0;
-      openvrU[1] = sample.u1;
-      openvrV[1] = sample.v1;
-      openvrTracked = true;
-      publisherTracked = true;
-      LOG_ONCE(INFO, "gaze-publisher-active",
-               "using the out-of-process vrsfov-gaze publisher for eye tracking");
-    }
-    if (publisherTracked) {
-      // A publisher and an in-process client must not both stay connected.
-      static bool closedInProcess = false;
-      if (!closedInProcess) {
-        closedInProcess = true;
-        openvrGazeShutdown();
-      }
-    }
-  }
-
-  if (!eyeTracked && !openvrTracked && !publisherPresent && wantOpenvr) {
-    if (openvrAuto && !envFlag("VRSFOV_OPENVR_GAZE")) {
-      LOG_ONCE(INFO, "gaze-auto-openvr",
-               "native OpenXR gaze became inactive; trying the SteamVR OpenVR source");
-    }
-    static bool prepared = false;
-    static bool available = false;
-    if (!prepared) {
-      prepared = true;
-      std::string report;
-      available = openvrGazePrepare(report);
-      LOG_INFO("VRSFOV_OPENVR_GAZE: %s", report.c_str());
-    }
-    if (available) {
-      float lu0 = 0.f, lv0 = 0.f, lu1 = 0.f, lv1 = 0.f;
-      if (openvrGazeRead(lu0, lv0, lu1, lv1)) {
-        session.openvrU[0] = lu0;
-        session.openvrV[0] = lv0;
-        session.openvrU[1] = lu1;
-        session.openvrV[1] = lv1;
-        session.openvrHave = true;
-      }
-      if (session.openvrHave) {  // hold the last sample through dropouts
-        openvrU[0] = session.openvrU[0];
-        openvrV[0] = session.openvrV[0];
-        openvrU[1] = session.openvrU[1];
-        openvrV[1] = session.openvrV[1];
-        openvrTracked = true;
-      }
-    }
-  }
-
-  if (!eyeTracked && !openvrTracked) {
+  // OpenXR applications always use the runtime's native eye-gaze action. The
+  // out-of-process OpenVR publisher is for OpenVR games only and is never
+  // consulted from this path.
+  if (!eyeTracked) {
     direction = fixedGazeDirection(config.fixedOffsetX, config.fixedOffsetY);
   }
 
-  const bool tracking = eyeTracked || openvrTracked;
+  const bool tracking = eyeTracked;
   if (tracking != session.eyeTrackedLogged) {
     session.eyeTrackedLogged = tracking;
     LOG_INFO("eye tracking %s",
-             tracking ? (eyeTracked ? "active"
-                                    : (publisherTracked ? "active (publisher)"
-                                                        : "active (OpenVR source)"))
-                      : "unavailable (using fixed foveation)");
+             tracking ? "active" : "unavailable (using fixed foveation)");
   }
 
   // 3. project into each eye image, smooth and publish.
   float u[2] = {0.5f, 0.5f};
   float v[2] = {0.5f, 0.5f};
   bool valid = session.haveViewCache;
+  const auto snap = SharedState::get().snapshot();
+  FovTan usedFov[2] = {fovTanFromXr(session.eyes[0].fov), fovTanFromXr(session.eyes[1].fov)};
   for (int i = 0; i < 2; ++i) {
     if (!session.eyes[i].valid) {
       valid = false;
       continue;
     }
-    const GazeUv projected =
-        openvrTracked ? GazeUv{openvrU[i], openvrV[i], true}
-                      : projectGaze(direction, quatFromXr(session.eyes[i].pose.orientation),
-                                    fovTanFromXr(session.eyes[i].fov));
+    // The fov the app submits with its projection layer is what the compositor
+    // uses to map the eye image onto the display, and it is what the app rendered
+    // with. Prefer it over the runtime's recommended fov: some apps submit a
+    // different fov (a crop, another aspect, or a vertically flipped image), and
+    // the recommended fov then puts the fovea and the paint marker in the wrong
+    // place in that eye.
+    if (snap && snap->submittedView[i].fov.valid) {
+      const ViewFov& f = snap->submittedView[i].fov;
+      usedFov[i] = fovToTan(f.left, f.right, f.up, f.down);
+    }
+    const GazeUv projected = projectGaze(direction, quatFromXr(session.eyes[i].pose.orientation),
+                                         usedFov[i]);
     const float projectedV = config.gazeYFlip ? 1.f - projected.v : projected.v;
     session.smoothU[i] = smoothGazeSample(session.smoothU[i], projected.u, config.smoothing,
                                           &session.haveSmoothU[i]);
@@ -446,6 +385,47 @@ void xrUpdateGaze(XrSessionData& session, XrTime displayTime) {
     u[i] = session.smoothU[i];
     v[i] = session.smoothV[i];
   }
+
+  // Diagnostic for VRSFOV_PAINT_GAZE: once a second, report the projected per-eye
+  // gaze together with the per-eye view data it came from. A vertically swapped
+  // fov or a rotated eye pose on one eye shows up here, and it is what makes the
+  // two painted boxes drift apart on pitch while staying merged at the centre.
+  if (config.paintGaze && session.haveViewCache) {
+    static std::atomic<int64_t> lastGazeLogNs{0};
+    const int64_t nowLog = nowNs();
+    int64_t last = lastGazeLogNs.load(std::memory_order_relaxed);
+    if (nowLog - last > 1000LL * 1000 * 1000 &&
+        lastGazeLogNs.compare_exchange_strong(last, nowLog, std::memory_order_relaxed)) {
+      LOG_INFO("gaze project: L=(%.3f,%.3f) R=(%.3f,%.3f) "
+               "fov L[%.3f %.3f %.3f %.3f] R[%.3f %.3f %.3f %.3f]",
+               (double)u[0], (double)v[0], (double)u[1], (double)v[1],
+               (double)usedFov[0].left, (double)usedFov[0].right, (double)usedFov[0].up,
+               (double)usedFov[0].down, (double)usedFov[1].left, (double)usedFov[1].right,
+               (double)usedFov[1].up, (double)usedFov[1].down);
+      LOG_INFO("gaze pose: L[%.3f %.3f %.3f %.3f] R[%.3f %.3f %.3f %.3f]", 
+               (double)session.eyes[0].pose.orientation.x,
+               (double)session.eyes[0].pose.orientation.y,
+               (double)session.eyes[0].pose.orientation.z,
+               (double)session.eyes[0].pose.orientation.w,
+               (double)session.eyes[1].pose.orientation.x,
+               (double)session.eyes[1].pose.orientation.y,
+               (double)session.eyes[1].pose.orientation.z,
+               (double)session.eyes[1].pose.orientation.w);
+      if (snap && snap->submittedView[0].fov.valid) {
+        LOG_INFO("gaze submitted fov: L[%.3f %.3f %.3f %.3f] R[%.3f %.3f %.3f %.3f]",
+                 (double)snap->submittedView[0].fov.left, (double)snap->submittedView[0].fov.right,
+                 (double)snap->submittedView[0].fov.up, (double)snap->submittedView[0].fov.down,
+                 (double)snap->submittedView[1].fov.left, (double)snap->submittedView[1].fov.right,
+                 (double)snap->submittedView[1].fov.up, (double)snap->submittedView[1].fov.down);
+        LOG_INFO("gaze submitted pose: L[%.3f %.3f %.3f %.3f] R[%.3f %.3f %.3f %.3f]",
+                 (double)snap->submittedView[0].qx, (double)snap->submittedView[0].qy,
+                 (double)snap->submittedView[0].qz, (double)snap->submittedView[0].qw,
+                 (double)snap->submittedView[1].qx, (double)snap->submittedView[1].qy,
+                 (double)snap->submittedView[1].qz, (double)snap->submittedView[1].qw);
+      }
+    }
+  }
+
   publishEyes(session, u, v, valid, tracking);
 }
 

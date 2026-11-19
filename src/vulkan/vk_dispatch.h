@@ -70,11 +70,17 @@ struct DeviceDispatch {
   PFN_vkCmdBeginRenderPass CmdBeginRenderPass = nullptr;
   PFN_vkCmdBeginRenderPass2 CmdBeginRenderPass2 = nullptr;
   PFN_vkCmdBeginRenderPass2KHR CmdBeginRenderPass2KHR = nullptr;
+  PFN_vkCmdEndRenderPass CmdEndRenderPass = nullptr;
+  PFN_vkCmdEndRenderPass2 CmdEndRenderPass2 = nullptr;
+  PFN_vkCmdEndRenderPass2KHR CmdEndRenderPass2KHR = nullptr;
   PFN_vkCmdBeginRendering CmdBeginRendering = nullptr;
   PFN_vkCmdBeginRenderingKHR CmdBeginRenderingKHR = nullptr;
+  PFN_vkCmdEndRendering CmdEndRendering = nullptr;
+  PFN_vkCmdEndRenderingKHR CmdEndRenderingKHR = nullptr;
   PFN_vkCmdPipelineBarrier CmdPipelineBarrier = nullptr;
   PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage = nullptr;
   PFN_vkCmdClearColorImage CmdClearColorImage = nullptr;
+  PFN_vkCmdClearAttachments CmdClearAttachments = nullptr;
 };
 
 struct InstanceData {
@@ -96,6 +102,8 @@ struct CmdState {
   bool neutralInitialized = false;
   void* neutralInitImage = nullptr;               // neutral image that was initialized
   VkImageView lastAttachedView = VK_NULL_HANDLE;  // for suspend/resume
+  std::vector<VkClearRect> pendingPaintRects;     // VRSFOV_PAINT_GAZE rects for active pass
+  std::vector<VkClearRect> savedPaintRects;       // for suspend/resume
 };
 
 // Per render pass bookkeeping (05 §1.2).
@@ -159,6 +167,7 @@ struct DeviceData {
   // Vulkan half loaded itself, for hot reload.
   Config localConfig;
   bool standalone = false;
+  bool autoStandalone = false;
   std::string configPath;
   int64_t configMtime = 0;
   int64_t lastConfigCheckNs = 0;

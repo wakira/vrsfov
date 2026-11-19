@@ -2,6 +2,7 @@
 #include "common/guard.h"
 #include "common/log.h"
 #include "common/shared_state.h"
+#include "gaze/shm_gaze.h"
 #include "vulkan/vk_dispatch.h"
 #include "vulkan/vk_hooks.h"
 
@@ -65,11 +66,17 @@ void resolveDeviceDispatch(DeviceData& data) {
   VRSFOV_RESOLVE(CmdBeginRenderPass, "vkCmdBeginRenderPass");
   VRSFOV_RESOLVE(CmdBeginRenderPass2, "vkCmdBeginRenderPass2");
   VRSFOV_RESOLVE(CmdBeginRenderPass2KHR, "vkCmdBeginRenderPass2KHR");
+  VRSFOV_RESOLVE(CmdEndRenderPass, "vkCmdEndRenderPass");
+  VRSFOV_RESOLVE(CmdEndRenderPass2, "vkCmdEndRenderPass2");
+  VRSFOV_RESOLVE(CmdEndRenderPass2KHR, "vkCmdEndRenderPass2KHR");
   VRSFOV_RESOLVE(CmdBeginRendering, "vkCmdBeginRendering");
   VRSFOV_RESOLVE(CmdBeginRenderingKHR, "vkCmdBeginRenderingKHR");
+  VRSFOV_RESOLVE(CmdEndRendering, "vkCmdEndRendering");
+  VRSFOV_RESOLVE(CmdEndRenderingKHR, "vkCmdEndRenderingKHR");
   VRSFOV_RESOLVE(CmdPipelineBarrier, "vkCmdPipelineBarrier");
   VRSFOV_RESOLVE(CmdCopyBufferToImage, "vkCmdCopyBufferToImage");
   VRSFOV_RESOLVE(CmdClearColorImage, "vkCmdClearColorImage");
+  VRSFOV_RESOLVE(CmdClearAttachments, "vkCmdClearAttachments");
 #undef VRSFOV_RESOLVE
 }
 
@@ -372,7 +379,7 @@ class FsrFeaturePatch {
 void installSyntheticSnapshot(DeviceData& data, const Config& cfg) {
   const char* spec = getenv("VRSFOV_FAKE_EYE");
   const bool haveFakeEye = spec && *spec;
-  if (!haveFakeEye && !cfg.standalone) return;
+  if (!haveFakeEye && !cfg.standalone && !data.standalone) return;
 
   uint32_t w = cfg.eyeWidth, h = cfg.eyeHeight;
   if (haveFakeEye && (sscanf(spec, "%ux%u", &w, &h) != 2 || w == 0 || h == 0)) {
@@ -418,7 +425,9 @@ void installSyntheticSnapshot(DeviceData& data, const Config& cfg) {
   LOG_INFO("config (file + environment): %s", configSummary(cfg).c_str());
   if (w == 0 || h == 0) {
     LOG_WARN("no usable eye size: every colour target will be foveated at the centre "
-             "(set eye_size = WxH, or VRSFOV_FAKE_EYE=WxH)");
+             "(set eye_size = WxH; for an OpenVR game with VRSFOV_OPENVR_GAZE=1 the "
+             "publisher's recommended size is used when it becomes available, or use "
+             "VRSFOV_FAKE_EYE=WxH)");
   }
 }
 
@@ -434,6 +443,7 @@ void reloadStandaloneConfig(DeviceData& data) {
 
   const uint64_t generation = data.localConfig.generation + 1;
   Config reloaded = loadConfigForProcess(std::string(), generation, data.configPath);
+  if (data.autoStandalone) reloaded.standalone = true;
   data.localConfig = reloaded;
   LOG_INFO("standalone config reloaded (generation %llu): %s", (unsigned long long)generation,
            configSummary(reloaded).c_str());
@@ -451,46 +461,57 @@ void reloadStandaloneConfig(DeviceData& data) {
   installSyntheticSnapshot(data, reloaded);
 }
 
-// Standalone mode has no OpenXR half, so an OpenVR game can get its gaze straight
-// from SteamVR when VRSFOV_OPENVR_GAZE is set: the per-eye eye-tracked
-// foveation centre, published into the shared snapshot the classifier reads per
-// eye. Opt-in, because it opens a second SteamVR client inside the game's
-// process; the last value is kept when a poll has no sample, so the spot does not
-// snap back to the centre.
+// Standalone mode has no OpenXR half, so an OpenVR game can get its gaze from
+// the out-of-process vrsfov-gaze publisher when VRSFOV_OPENVR_GAZE is set: the
+// per-eye eye-tracked foveation centre and the runtime's recommended per-eye
+// size. The shared snapshot is read by the classifier per eye. Opt-in, because
+// it needs the publisher process; the last gaze value is kept when a poll has no
+// sample, so the spot does not snap back to the centre.
 //
-// Polled at ~120 Hz (one update per sample the compositor can actually provide),
-// not once a second: the eye-tracked centre has to follow the eyes, and a 1 s
-// poll made it look like a fixed spot that occasionally jumped. `smoothing`
-// applies an EMA exactly as it does for the OpenXR source.
+// Polled at ~120 Hz at the layer side (the publisher samples at 60 Hz); a 1 s
+// poll made a moving eye-tracked centre look like a fixed spot that occasionally
+// jumped. `smoothing` applies an EMA exactly as it does for the OpenXR source.
 
 }  // namespace
 
 void vrsfovMaybeReloadStandaloneConfig(DeviceData& data) { reloadStandaloneConfig(data); }
 
-// Late activation: a device that was created before the XrInstance. It already has
-// our extensions and features enabled (see vrsfov_vkCreateDevice), so all that is
-// missing is the go-ahead, and that is exactly the same condition as at creation
-// time: an XrInstance must exist. Checked while recording, throttled to once a
-// second - command buffers are recorded as the app starts up, so this catches an
-// app that initialises Vulkan graphics before OpenXR (VTOL VR does).
+// Late activation: a device that was created before the XrInstance (or before
+// vrclient was mapped in an OpenVR game). It already has our extensions and
+// features enabled (see vrsfov_vkCreateDevice), so all that is missing is the
+// go-ahead: an XrInstance must exist, or an OpenVR client must be mapped with
+// no OpenXR loader. Checked while recording, throttled to once a second.
 void maybeActivate(DeviceData& data) {
   if (data.active || !data.pendingInstance) return;
   const int64_t now = nowNs();
   if (now - data.lastActivateCheckNs < 1000LL * 1000 * 1000) return;
   data.lastActivateCheckNs = now;
-  if (SharedState::get().liveXrInstances.load() <= 0) return;
 
+  const bool haveXr = SharedState::get().liveXrInstances.load() > 0;
+  const bool standaloneEnvSet = getenv("VRSFOV_STANDALONE") != nullptr;
+  const bool openvrAuto = !haveXr && !standaloneEnvSet && !openxrLoaderMappedInProcess() &&
+                          openvrClientMappedInProcess();
+  if (!haveXr && !openvrAuto) return;
+
+  if (openvrAuto) {
+    data.standalone = true;
+    data.autoStandalone = true;
+    data.localConfig.standalone = true;
+    installSyntheticSnapshot(data, data.localConfig);
+    updateStandaloneGaze(data);
+  }
   data.active = true;
   data.pendingInstance = false;
   const Caps& c = data.caps;
-  LOG_INFO("device %p ACTIVE (late: the OpenXR instance appeared after this device): texel %u, "
+  LOG_INFO("device %p ACTIVE (late: %s appeared after this device): texel %u, "
            "rates inner %s middle %s outer %s (supported %zu), layered=%d nonTrivialCombiners=%d "
            "dynamicRendering=%d; render passes, framebuffers and pipelines created before now stay "
            "unmodified",
-           reinterpret_cast<void*>(data.device), c.texel, rateToString(c.innerRate).c_str(),
-           rateToString(c.middleRate).c_str(), rateToString(c.outerRate).c_str(),
-           c.supportedRates.size(), (int)c.layeredAttachments, (int)c.nonTrivialCombiners,
-           (int)c.dynamicRenderingAvailable);
+           reinterpret_cast<void*>(data.device),
+           openvrAuto ? "OpenVR client" : "the OpenXR instance", c.texel,
+           rateToString(c.innerRate).c_str(), rateToString(c.middleRate).c_str(),
+           rateToString(c.outerRate).c_str(), c.supportedRates.size(), (int)c.layeredAttachments,
+           (int)c.nonTrivialCombiners, (int)c.dynamicRenderingAvailable);
 }
 
 }  // namespace vrsfov
@@ -537,6 +558,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vrsfov_vkCreateDevice(VkPhysicalDevice physicalDe
   Config localConfig = loadConfigForProcess(std::string(), 0, configPath);
   auto snapshot = SharedState::get().snapshot();
   const bool haveXr = SharedState::get().liveXrInstances.load() > 0;
+  const bool standaloneEnvSet = getenv("VRSFOV_STANDALONE") != nullptr;
+  if (!haveXr && !localConfig.standalone && !standaloneEnvSet &&
+      !openxrLoaderMappedInProcess() && openvrClientMappedInProcess()) {
+    localConfig.standalone = true;
+    data->autoStandalone = true;
+    LOG_INFO("OpenVR client detected without OpenXR; auto-enabling standalone mode");
+  }
   const Config& cfg = haveXr ? effectiveConfig(snapshot) : localConfig;
 
   data->localConfig = localConfig;
@@ -605,7 +633,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vrsfov_vkCreateDevice(VkPhysicalDevice physicalDe
   resolveDeviceDispatch(*data);
   data->active = activation.active;
   data->pendingInstance = capable && activation.pendingInstance;
-  if (data->active) installSyntheticSnapshot(*data, cfg);
+  if (data->active) {
+    installSyntheticSnapshot(*data, cfg);
+    if (data->standalone) updateStandaloneGaze(*data);
+  }
   if (data->active) {
     const Caps& c = data->caps;
     LOG_INFO("device %p ACTIVE: texel %u, rates inner %s middle %s outer %s (supported %zu), "

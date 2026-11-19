@@ -4,8 +4,8 @@ VRS-based foveated rendering for Linux VR, two build targets:
 
 | Target | Artifact | What it does | Gaze source |
 |---|---|---|---|
-| `pc` | `libvrsfov.so` (Vulkan + OpenXR layers) | native Vulkan OpenXR apps and Proton games via wineopenxr + DXVK/vkd3d-proton | `XR_EXT_eye_gaze_interaction`, optional SteamVR OpenVR fallback |
-| `frame` | `libvrsfov.so` (Vulkan layer) + `vrsfov-gaze` | Steam Frame / standalone Vulkan apps (OpenVR and native) | the `vrsfov-gaze` publisher over `/dev/shm/vrsfov-gaze` |
+| `pc` | `libvrsfov.so` (Vulkan + OpenXR layers) + `vrsfov-gaze` | native Vulkan OpenXR apps and Proton games via wineopenxr + DXVK/vkd3d-proton; OpenVR-only games through standalone mode | `XR_EXT_eye_gaze_interaction` for OpenXR; out-of-process `vrsfov-gaze` publisher for OpenVR games |
+| `frame` | `libvrsfov.so` (Vulkan layer) + `vrsfov-gaze` | Steam Frame / standalone Vulkan apps (OpenVR and native) | out-of-process `vrsfov-gaze` publisher over `/dev/shm/vrsfov-gaze` |
 
 The shared Vulkan core enables `VK_KHR_fragment_shading_rate` at device creation,
 adds a fragment-shading-rate (FSR) attachment to every render pass / dynamic
@@ -16,9 +16,12 @@ gaze-dependent offset).
 
 On the PC target, an OpenXR API layer learns the session's `VkDevice`, per-eye
 FOV, the eye render regions of the last `xrEndFrame` and the gaze point, then
-publishes an immutable snapshot for the Vulkan half. On the Frame target there is
-no OpenXR half: the layer is standalone by default and reads the per-eye centre
-that `vrsfov-gaze` publishes.
+publishes an immutable snapshot for the Vulkan half. OpenVR-only games do not use
+OpenXR at all: they run the Vulkan layer in standalone mode and read gaze and the
+recommended per-eye size from the out-of-process `vrsfov-gaze` publisher over
+`/dev/shm/vrsfov-gaze`. On the Frame target there is no OpenXR half; the layer is
+standalone by default and uses the same publisher. No SteamVR client is ever
+created inside the game's process.
 
 The design is documented in [`plan/`](plan/) — start at
 [`plan/00-overview.md`](plan/00-overview.md). For details that the plan leaves
@@ -45,7 +48,7 @@ cmake -B build-pc -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=pc
 cmake --build build-pc
 ctest --test-dir build-pc --output-on-failure
 
-# Steam Frame: Vulkan layer + gaze publisher, no OpenXR half
+# Steam Frame: Vulkan layer with the out-of-process OpenVR publisher, no OpenXR half
 cmake -B build-frame -GNinja -DVRSFOV_USE_SYSTEM_HEADERS=ON -DVRSFOV_PLATFORM=frame
 cmake --build build-frame
 ctest --test-dir build-frame --output-on-failure
@@ -62,10 +65,81 @@ Without Nix, CMake fetches pinned `Vulkan-Headers` and `OpenXR-SDK` headers with
 | `VRSFOV_BUILD_TESTS` | `ON` | build the unit tests and register `ctest` entries |
 | `VRSFOV_BUILD_GPU_TESTS` | `ON` | build the headless GPU end-to-end test app |
 
+## Install (`install.sh` / NixOS Home Manager)
+
+### Install script (`install.sh`)
+
+```sh
+./install.sh                  # Build & install PC target (Vulkan + OpenXR implicit layers + vrsfov-gaze user service)
+./install.sh --frame          # Build & install Steam Frame target (Vulkan implicit layer + vrsfov-gaze user service)
+./install.sh --uninstall      # Stop service and remove installed layers/binaries
+```
+
+(Or run `scripts/install-pc.sh` / `scripts/install-frame.sh`.)
+
+This installs:
+- `~/.local/share/vrsfov/libvrsfov.so`, `vrsfov-gaze`, and `vrsfov-overlay` (plus symlinks in `~/.local/bin/`)
+- `~/.local/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json`
+- `~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json` (PC target)
+- `~/.config/systemd/user/vrsfov-gaze.service` (enabled and started; stays idle until an OpenVR game renders)
+
+Once installed, enable foveated rendering per game in Steam launch options with:
+
+```sh
+VRSFOV_ENABLE=1 %command%
+```
+
+(For Proton OpenXR games without `run-pc.sh`, if `PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1` is not set in your user environment, use `VRSFOV_ENABLE=1 PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1 %command%`. OpenVR games automatically enter standalone mode and connect to `vrsfov-gaze` when `VRSFOV_ENABLE=1` is set.)
+
+### NixOS Home Manager
+
+The repository flake exposes `packages.<system>.default` (alias `pc`) and `packages.<system>.frame`. You can install the implicit layers and the `vrsfov-gaze` user service declaratively in your Home Manager configuration:
+
+```nix
+# In flake.nix inputs:
+#   vrsfov.url = "github:autrim64/Linux-Foveated-Rendering?dir=vrsfov"; # or path:/path/to/vrsfov
+
+{ config, pkgs, inputs, ... }:
+let
+  vrsfovPkg = inputs.vrsfov.packages.${pkgs.stdenv.hostPlatform.system}.pc; # or .frame
+in
+{
+  home.packages = [ vrsfovPkg ];
+
+  # Register the implicit Vulkan and OpenXR layers under ~/.local/share
+  xdg.dataFile."vulkan/implicit_layer.d/VkLayer_vrsfov.json".source =
+    "${vrsfovPkg}/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json";
+
+  xdg.dataFile."openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json".source =
+    "${vrsfovPkg}/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json";
+
+  # Optional: allow Proton (pressure-vessel) to import host OpenXR layers automatically
+  home.sessionVariables = {
+    PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS = "1";
+  };
+
+  # Run vrsfov-gaze in the background (stays idle at 0% CPU until an OpenVR game renders)
+  systemd.user.services.vrsfov-gaze = {
+    Unit = {
+      Description = "VRSFov SteamVR Eye-Tracked Gaze Publisher";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${vrsfovPkg}/bin/vrsfov-gaze -q";
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+    Install = {
+      WantedBy = [ "default.target" ];
+    };
+  };
+}
+```
+
 ## Run without installing
 
-There are no install scripts and no CMake install rules. The build tree is the
-install; the standard loader environment variables point at its manifests:
+If you prefer not to install anything to `~/.local`, the build tree can be used directly via the standard loader environment variables:
 
 ```sh
 # PC
@@ -89,9 +163,16 @@ PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1
 VRSFOV_ENABLE=1
 ```
 
+Both run scripts also start `build-*/vrsfov-gaze` once if it is not already
+running (`VRSFOV_START_GAZE=0` leaves it alone). The publisher stays idle until
+the layer writes `/dev/shm/vrsfov-gaze.want`, and the layer only does that for an
+OpenVR game: standalone mode, no `XrInstance`, and an OpenVR client mapped
+(native `vrclient.so` or Wine's `vrclient.dll`). OpenXR
+and plain Vulkan applications never contact it.
+
 `run-frame.sh` sets only the Vulkan variables, `VRSFOV_ENABLE=1` and
-`VRSFOV_OPENVR_GAZE=1`, and starts `vrsfov-gaze` once if it is not already
-running (`VRSFOV_START_GAZE=0` disables that). Nothing is written to `/usr` or to
+`VRSFOV_OPENVR_GAZE=1`. The layer reads the publisher's shared-memory record;
+nothing in the game process talks to SteamVR. Nothing is written to `/usr` or to
 the loader's implicit-layer directories. `VRSFOV_DISABLE=1` forces the layer off.
 The only files touched outside the build tree are the config
 (`~/.config/vrsfov/settings.ini`) and the log
@@ -112,31 +193,36 @@ Launch a game with:
 scripts/run-frame.sh %command%
 ```
 
-or set the same variables by hand:
+or set the same variables by hand (start `build-frame/vrsfov-gaze -q` once as
+well, or set the variables and start it yourself):
 
 ```sh
+build-frame/vrsfov-gaze -q &          # once, stays idle until a game asks
 VK_LAYER_PATH=$PWD/build-frame/manifests/vulkan \
 VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs \
 VRSFOV_ENABLE=1 VRSFOV_OPENVR_GAZE=1 %command%
 ```
 
-Start `build-frame/vrsfov-gaze -q` once (or let `run-frame.sh` do it) if you do
-not already have a user service for it.
-
 `standalone = 1` is the compile-time default on this target, so no config edit is
 needed for a first run. `vrsfov-gaze` is the only process that talks to SteamVR;
 the layer reads `/dev/shm/vrsfov-gaze`. The publisher stays disconnected until a
-game writes `/dev/shm/vrsfov-gaze.want` (once per second while rendering), which
-keeps it from becoming the OpenVR session manager at boot. Turn Valve's own
+game writes `/dev/shm/vrsfov-gaze.want` (once per second while rendering), so it
+does not become the SteamVR session manager at boot. It is started on demand only
+for OpenVR games: the layer requires an OpenVR client (`vrclient.so` or Wine's
+`vrclient.dll`) to be mapped. Turn Valve's own
 foveation layer off for a clean comparison:
 
 ```sh
 VK_LOADER_LAYERS_DISABLE=VK_LAYER_VALVE_fdm_injection
 ```
 
-On the Frame, `eye_tracking` in the config only controls the unused OpenXR path;
-the shm publisher is enabled by `VRSFOV_OPENVR_GAZE`. `VRSFOV_OPENVR_CLIENT`
-selects the publisher's SteamVR client type (2/other by default).
+On the Frame, `eye_tracking = 0` keeps the publisher's recommended per-eye size
+but leaves the fovea fixed instead of following SteamVR's eye-tracked centre; the
+publisher is enabled by `VRSFOV_OPENVR_GAZE`, which both run scripts set. With
+`eye_size` left unset, that recommended size is used for target classification.
+`VRSFOV_OPENVR_CLIENT` selects the publisher's client type (2/other by default).
+If SteamVR is not in a standard location, set
+`VRSFOV_STEAMVR_DIR=/path/to/SteamVR/bin/linux64`.
 
 ## Testing
 
@@ -144,7 +230,7 @@ selects the publisher's SteamVR client type (2/other by default).
 
 | Test | What it covers |
 |---|---|
-| `unit` | 59 unit tests on the PC target (config/INI, pattern, classify, gaze projection, gaze shm, render-pass conversion, SPIR-V scan, OpenXR helpers); 51 on the frame target |
+| `unit` | 59 unit tests on the PC target (config/INI, pattern, classify, gaze projection, shared-memory gaze record, render-pass conversion, SPIR-V scan, OpenXR helpers); 51 on the frame target |
 | `vk_vrs_test_*` | GPU end-to-end with a synthesized snapshot (`dynamic`, `rp1`, `rp2`, `multiview`, `imageless`, `nonEyeSize`) |
 | `xr_layer_probe` | the OpenXR loader discovers and negotiates the API layer |
 | `vk_layer_probe` | loader-protocol requirements of the Vulkan layer: it must provide `vkCreateInstance` for *any* instance argument (loaders and winevulkan ask with a handle of their own) and must not crash on handles it does not own |
@@ -249,57 +335,66 @@ the circles appear, the driver is honouring the attachment, so any "I cannot see
 it" after that is about how subtle `2x2` looks, not about the layer. Turn it off
 (`draw_radii = off`) for real use.
 
-### SteamVR-native gaze source (experimental, `VRSFOV_OPENVR_GAZE=1`)
+### SteamVR-native gaze source for OpenVR games (`vrsfov-gaze`)
 
-The layer now suggests its own eye-gaze binding, so an app that never mentions
-`/interaction_profiles/ext/eye_gaze_interaction` still gets a bound action. Some
-SteamVR versions have been observed reporting that action as inactive even with the
+Some SteamVR versions report the OpenXR eye-gaze action as inactive even with the
 binding present (measured on SteamVR 2.18.3 with the Frame's vrlink driver), while
-SteamVR's *own* eye tracking is available to the renderer
+SteamVR's *own* eye tracking is available through OpenVR
 (`IVRSystem::GetEyeTrackedFoveationCenter`, `Prop_SupportsXrEyeGazeInteraction_Bool`).
-The optional source below covers that case.
+That source is only for **OpenVR games**. OpenXR applications always use their
+native `XR_EXT_eye_gaze_interaction` action and never contact the publisher.
 
-With `VRSFOV_OPENVR_GAZE=1` the layer loads `libopenvr_api.so` from the same
-install as the `vrclient.so` already mapped into the process, initialises an
-"Other" SteamVR client (`VRSFOV_OPENVR_CLIENT` selects the type; 2 is the
-default, 1/background is refused gaze by SteamVR), logs what it finds and uses the
-per-eye foveation centre when the runtime provides it:
+`vrsfov-gaze` is a separate process. It connects to SteamVR as a non-scene client
+(`VRSFOV_OPENVR_CLIENT` selects the type; 2/other is the default because SteamVR
+refuses eye-tracked data to background clients), polls the per-eye centre and the
+recommended per-eye size, and publishes both into `/dev/shm/vrsfov-gaze`. The
+layer only reads that record, so no SteamVR client is created, initialized or
+shut down inside the game's process. This is what avoids both the freeze and the
+overlay glitches observed with the in-process experiments.
 
-```
-INFO [xr] VRSFOV_OPENVR_GAZE=1: runtime 2.18.3, HMD 'Deckard MP', IVRSystem_026,
-     Prop_SupportsXrEyeGazeInteraction=true, GetEyeTrackedFoveationCenter=ok
-INFO [xr] eye tracking active (OpenVR source)
-```
+Connection is on demand: the layer writes `/dev/shm/vrsfov-gaze.want` once per
+second while an OpenVR game is rendering, and the publisher stays disconnected
+otherwise. The start scripts start it once (`VRSFOV_START_GAZE=0` leaves it alone).
 
-For **OpenVR-only games** (no `XrInstance`, so the OpenXR half never runs) the same
-source is available in standalone mode: with `standalone = 1` and
-`VRSFOV_OPENVR_GAZE=1`, the Vulkan half polls the per-eye centre at ~120 Hz,
-applies `smoothing`/`gaze_yflip`, and publishes it as the snapshot's gaze, so those
-titles get gaze-following foveation instead of a fixed spot (`fixed_offset_x/y` no
-longer apply). Look for:
+For **OpenVR-only games** (no `XrInstance`, so the OpenXR half never runs) use
+standalone mode:
 
-```
-INFO [vk] standalone gaze (VRSFOV_OPENVR_GAZE): client type 2; … GetEyeTrackedFoveationCenter=ok
-INFO [vk] standalone gaze: eye tracking active (OpenVR source), centre left (0.6xx, 0.5xx) right (0.6xx, 0.5xx)
+```sh
+VRSFOV_STANDALONE=1 VRSFOV_OPENVR_GAZE=1 scripts/run-pc.sh %command%
 ```
 
-The snapshot carries the gaze per eye, so a per-eye or side-by-side target gets each
-eye's own centre and only a single-target pass uses their average.
+The layer only contacts the publisher when:
+- standalone mode is active,
+- no OpenXR loader is mapped and no `XrInstance` exists in the process, and
+- an OpenVR client is mapped (native `vrclient.so` or Wine's `vrclient.dll`).
 
-On PC, `run-pc.sh` also starts `build-pc/vrsfov-gaze` as an out-of-process
-fallback. Some games keep the OpenXR gaze action active in menus but report it
-inactive in gameplay; the layer then tries an in-process OpenVR client and, if
-that has no data, reads the publisher over `/dev/shm/vrsfov-gaze`. The publisher
-is a separate SteamVR client, so it is not tied to the game's OpenXR session.
-`VRSFOV_START_GAZE=0` stops the launcher from starting it; `VRSFOV_OPENVR_GAZE=0`
-disables both OpenVR fallbacks. If SteamVR is not in a standard location, set
-`VRSFOV_STEAMVR_DIR=/path/to/SteamVR/bin/linux64`.
+So plain Vulkan applications and OpenXR applications are never affected. The
+publisher logs on connect:
 
-It is opt-in and off by default because it adds a second SteamVR client to the
-game's process; SteamVR may also refuse gaze to a secondary client, in which case
-the log says `GetEyeTrackedFoveationCenter=no data` and fixed foveation continues. The header is taken from the system (the dev shell sets
-`VRSFOV_OPENVR_INCLUDE_DIR`) or downloaded at configure time; the library itself is
-never linked, only `dlopen`ed.
+```text
+vrsfov-gaze: connected: client type 2; runtime 2.19.2, HMD '...', IVRSystem_026, ...
+vrsfov-gaze: recommended per-eye size 3944x3944
+```
+
+and the layer uses it with the usual `smoothing`/`gaze_yflip` settings. When
+`eye_size` is left at `0`/`auto`, the publisher's recommended per-eye size becomes
+the classifier reference, so the actual eye target is recognised while the
+desktop mirror, HUD and UI targets stay neutral. An explicit `eye_size` always
+wins:
+
+```text
+INFO [vrsfov] standalone size: using publisher recommended per-eye 3944x3944 (eye_size is auto)
+INFO [vk] standalone gaze: eye tracking active (publisher), centre left (0.6xx, 0.5xx) right (0.6xx, 0.5xx)
+```
+
+SteamVR may refuse gaze to a secondary client, in which case the log says
+`GetEyeTrackedFoveationCenter=no data` and fixed foveation continues (the
+recommended size still arrives). If an HMD/runtime reports a centre without real
+eye tracking (a Quest 2 through SteamVR has been seen doing this), set
+`eye_tracking = 0`: the publisher's recommended size is still used for target
+classification, but the fovea stays fixed. If SteamVR is not in a standard
+location, set `VRSFOV_STEAMVR_DIR=/path/to/SteamVR/bin/linux64`. The publisher
+needs the OpenVR header at build time; the library itself is `dlopen`ed.
 
 ### Seeing the radii in VR: `vrsfov-overlay`
 
@@ -377,7 +472,7 @@ centre of the eye image.
 ```ini
 [global]
 enabled = 1
-eye_tracking = 1
+eye_tracking = 1             ; 0 = fixed fovea (publisher size still used)
 preset = lo                  ; lo | med | hi (Valve FDM geometry; explicit keys win)
 inner_radius = 0.286         ; eye-tracked radii, normalized eye-image units
 outer_radius = 0.95
@@ -424,6 +519,9 @@ Test/debug environment variables (not part of the config file):
 | `VRSFOV_FORCE_ACTIVE` | activate the Vulkan half without an `XrInstance` (testing) |
 | `VRSFOV_FAKE_EYE=WxH` | synthesize the snapshot instead of running the OpenXR half |
 | `VRSFOV_FAKE_GAZE=u,v` | gaze point used with `VRSFOV_FAKE_EYE` |
+| `VRSFOV_OPENVR_GAZE=1` | enable the out-of-process publisher for an OpenVR game |
+| `VRSFOV_OPENVR_CLIENT=2` | publisher client type: 2/other (default), 1/background, 3/overlay, 5/utility |
+| `VRSFOV_START_GAZE=0` | do not start `vrsfov-gaze` from `run-pc.sh`/`run-frame.sh` |
 
 Logs: `$XDG_STATE_HOME/vrsfov/vrsfov.log`. The file is **appended** to and
 each process that loads the layer writes a header, so a game, SteamVR's compositor
@@ -514,7 +612,7 @@ pipelines and every rate image update).
 | nothing in the log for a game, no header line with the game's name | the layer was not enabled for that process: the game needs `VRSFOV_ENABLE=1` **in its own launch options** (verify with `grep "adding PID" ~/.steam/steam/logs/gameprocess_log.txt`, the command line is logged verbatim) |
 | nothing in the log, no `[vk]`/`[xr]` lines | the layer is not enabled or not found: launch through `scripts/run-pc.sh`, or set `VK_LAYER_PATH`/`VK_INSTANCE_LAYERS` and `XR_API_LAYER_PATH`/`XR_ENABLE_API_LAYERS` to the build's `manifests/` directories |
 | `layer inactive (no OpenXR instance)` | the `XrInstance` is created *after* the `VkDevice` but no instance exists at all yet (plain Vulkan app, or the app crashed before OpenXR init); `VRSFOV_FORCE_ACTIVE=1` forces the layer on for testing |
-| `device … capable but waiting for an OpenXR instance` | the `VkDevice` was created before the `XrInstance` (VTOL VR does this). Nothing is wrong: the device activates on the next command buffer once the instance appears, and only objects created before that stay unmodified. If it never activates, the app never created an instance — use `standalone = 1` + `eye_size` for it |
+| `device … capable but waiting for an OpenXR instance` | the `VkDevice` was created before the `XrInstance` (VTOL VR does this). Nothing is wrong: the device activates on the next command buffer once the instance appears, and only objects created before that stay unmodified. If it never activates, the app never created an instance — use `standalone = 1` (+ `eye_size`, or `VRSFOV_OPENVR_GAZE=1` with auto size) for it |
 | `layer inactive (VK_KHR_fragment_shading_rate not available)` | the device/driver has no attachment VRS (e.g. llvmpipe), or the app already uses NV shading rate image / EXT fragment density map |
 | `layer inactive (R8_UINT is not a fragment shading rate attachment format)` | the driver does not support the required attachment format |
 | layer active but nothing is foveated | the render target is not recognised as an eye render (see the `classify` lines): try `[global] size_tolerance`/`min_size_ratio`; for XR apps check that `xrEndFrame` with a two-view projection layer is reached |
@@ -523,7 +621,7 @@ pipelines and every rate image update).
 | `draw_radii` circles are visible but only in one eye | the target was classified as a single eye; the `classify` line says which (render area vs framebuffer, viewMask/layers) |
 | everything is blocky (`debug_mode = 1` left on) | set `debug_mode = 0` |
 | Steam/Proton game: no layer (nothing in the log with the game's name) | launch the game through `scripts/run-pc.sh %command%` (or set the `VK_LAYER_PATH`/`VK_INSTANCE_LAYERS`/`XR_API_LAYER_PATH`/`XR_ENABLE_API_LAYERS` variables yourself); check that the build's `manifests/` paths are readable from inside the container |
-| Steam/Proton game starts but the fovea is not where the eye render is | the target-sizes are in the log at debug level (`render target WxH …`): set `eye_size` to what the game really renders, or omit `eye_size` to foveate every colour target |
+| Steam/Proton game starts but the fovea is not where the eye render is | the target-sizes are in the log at debug level (`render target WxH …`): set `eye_size` to what the game really renders, or omit `eye_size` to foveate every colour target. For OpenVR games with `VRSFOV_OPENVR_GAZE=1`, omitting it uses the runtime's recommended per-eye size |
 | the game exits within a second of launching | nothing to foveate yet: the layer only acts once the game creates its Vulkan device. Fix the game's startup first (anti-cheat, Proton version) |
 | validation complains about a pipeline/render pass combination | please report it with the log; the layer skips render passes it cannot modify and logs a WARN |
 
@@ -558,7 +656,7 @@ eye-target heuristics.
 ```ini
 [exe:SomeGame.exe]        ; or [global], or VRSFOV_* in the environment
 standalone = 1
-eye_size = 2432x2304      ; the game's per-eye render size, WxH
+eye_size = 2432x2304      ; WxH; auto = use OpenVR's recommendation with VRSFOV_OPENVR_GAZE=1
 fixed_inner_radius = 0.35 ; the sharp spot, in normalized eye-image units
 fixed_outer_radius = 0.80
 outer_rate = 2x2          ; 4x4 clamps to 2x2 on RADV
@@ -579,16 +677,21 @@ How it behaves:
   (checked before the single-eye case, so the sharp spot is not placed between the eyes);
   a multiview target gets both layers. Everything else stays at full rate, and depth-only
   passes are always skipped.
-- **No eye tracking** (OpenVR has no standard gaze API): the spot is wherever
-  `fixed_offset_x`/`fixed_offset_y` put it, unwrapped with a 90° FOV convention. With
-  `VRSFOV_OPENVR_GAZE=1` it follows SteamVR's eye-tracked centre instead.
+- **No eye tracking**: the spot is wherever `fixed_offset_x`/`fixed_offset_y` put it,
+  unwrapped with a 90° FOV convention. For an OpenVR game, `VRSFOV_OPENVR_GAZE=1`
+  lets the out-of-process publisher supply SteamVR's eye-tracked centre instead.
 - `[app:…]` sections cannot match (a Vulkan-only app has no `applicationName`); `[exe:…]`
   and `[global]` do.
 - The config is read at device creation and **hot reloaded** once per second while command
   buffers are being recorded (`standalone config reloaded (generation N)`); the pattern
   buffers are rebuilt when the generation changes.
 - With no `eye_size`, every colour target is foveated at the centre (logged as a warning):
-  useful to see the effect, noisy for real use.
+  useful to see the effect, noisy for real use. For an OpenVR game with
+  `VRSFOV_OPENVR_GAZE=1`, the publisher's recommended per-eye size
+  (`IVRSystem::GetRecommendedRenderTargetSize()`) is used as the reference instead as
+  soon as it is available; an explicit `eye_size` always wins. `eye_size = auto` means
+  the same as omitting it. Plain Vulkan apps have no publisher and keep the no-filter
+  behaviour unless `eye_size` is set.
 
 Verified on this machine (`vk_vrs_test_standalone_*` and `standalone_hot_reload` in `ctest`,
 plus the maps in the testing section): a Vulkan-only process with no `XrInstance` gets the
@@ -599,8 +702,9 @@ takes effect.
 
 SteamVR **is** an OpenXR runtime, so this is not an either/or: OpenXR is the API the app
 speaks, SteamVR is the runtime behind it. Anything that speaks OpenXR and renders with
-Vulkan gets foveated — native apps and Proton games alike. (OpenVR-only games are the ones
-this does not cover, see below.)
+Vulkan gets foveated — native apps and Proton games alike. OpenVR-only games do not create
+an `XrInstance`; they use standalone mode plus the out-of-process publisher described
+below. The publisher is never contacted by the OpenXR path.
 
 Verified on this machine:
 
@@ -632,14 +736,17 @@ and look for `runtime: SteamVR`, `session … created with VkDevice …`, `eye t
 the layer.
 
 **OpenVR games** never create an `XrInstance`, so the normal path leaves the Vulkan half
-inactive and there is no per-eye render information from OpenXR. Fixed foveation is still
+inactive and there is no per-eye render information from OpenXR. Fixed foveation is
 available through [standalone mode](#fixed-foveation-for-any-vulkan-app-standalone-mode)
 (`standalone = 1` + `eye_size = WxH`): the target is picked by size instead of by the
-swapchain registry, and the gaze is fixed. Eye *tracking* for OpenVR would need a vendor
-gaze bridge (there is no OpenVR equivalent of `XR_EXT_eye_gaze_interaction`) — see
-`PLAN.md`. Non-Vulkan apps (OpenGL, D3D9/11 without DXVK) are out of scope, and a flat
-non-VR Vulkan game is inert unless standalone mode is enabled. SteamVR's compositor warp is
-never modified: only the application's own eye renders are.
+swapchain registry, and the gaze is fixed. With `VRSFOV_OPENVR_GAZE=1` the layer instead
+reads the out-of-process `vrsfov-gaze` publisher, which can supply SteamVR's eye-tracked
+centre and the runtime's recommended per-eye size (`eye_size = auto`). The publisher is
+used **only** for OpenVR games: the layer requires an OpenVR client mapped and no
+`XrInstance`. OpenXR applications never fall back to it. Non-Vulkan apps (OpenGL,
+D3D9/11 without DXVK) are out of scope, and a flat non-VR Vulkan game is inert unless
+standalone mode is enabled. SteamVR's compositor warp is never modified: only the
+application's own eye renders are.
 
 ## Compatibility
 
@@ -652,6 +759,7 @@ never modified: only the application's own eye renders are.
 | SteamVR | runtime side verified here (OpenXR runtime manifest, `XR_EXT_eye_gaze_interaction` + binding path, pressure-vessel imports both layers); a headset run is still untested |
 | WiVRn / ALVR | not tested here; ALVR/WiVRn are OpenXR runtimes, so the same path applies |
 
-Applications: native Vulkan OpenXR apps (hello_xr, xrgears, Godot 4, Blender VR)
-and Proton games via wineopenxr + DXVK/vkd3d-proton. OpenGL apps and apps that
-already use VRS are left untouched.
+Applications: native Vulkan OpenXR apps (hello_xr, xrgears, Godot 4, Blender VR),
+Proton games via wineopenxr + DXVK/vkd3d-proton, and OpenVR games via standalone mode
+plus the out-of-process publisher. OpenGL apps and apps that already use VRS are left
+untouched.

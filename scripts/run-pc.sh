@@ -26,8 +26,9 @@ export XR_ENABLE_API_LAYERS="XR_APILAYER_VRSFOV_foveated_rendering"
 export PRESSURE_VESSEL_IMPORT_OPENXR_1_LAYERS=1
 export VRSFOV_ENABLE=1
 
-# The publisher is only contacted when the native OpenXR action goes inactive.
-# It stays idle otherwise (on-demand want file).
+# The publisher is only contacted by OpenVR games (the layer writes the want
+# file only after it sees vrclient.so and no XrInstance). It stays idle for
+# OpenXR and plain Vulkan applications.
 if [[ "${VRSFOV_START_GAZE:-1}" != "0" && -x "$build/vrsfov-gaze" ]] &&
    ! pgrep -x vrsfov-gaze >/dev/null 2>&1; then
   state="${XDG_STATE_HOME:-$HOME/.local/state}/vrsfov"

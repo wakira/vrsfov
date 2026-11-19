@@ -77,4 +77,10 @@ bool gazeCopyRegion(int32_t px, int32_t py, uint32_t pw, uint32_t ph, uint32_t l
 
 VkBufferImageCopy toVkBufferImageCopy(const CopyRegion& r);
 
+// Bounding box of the inner foveal zone in target pixel coordinates, clamped to
+// the eye region [px, px+pw) x [py, py+ph), for the VRSFOV_PAINT_GAZE debug fill.
+// Returns false when the resulting rectangle is empty.
+bool gazeInnerBoxRect(int32_t px, int32_t py, uint32_t pw, uint32_t ph, uint32_t layer, float u,
+                      float v, float innerRadius, float horizontalScale, VkClearRect& out);
+
 }  // namespace vrsfov

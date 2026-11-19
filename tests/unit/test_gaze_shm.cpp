@@ -20,6 +20,8 @@ VRSFOV_TEST(gaze_shm_roundtrip) {
   sample.valid = 1;
   sample.everValid = 1;
   sample.clientType = 2;
+  sample.recommendedW = 3944;
+  sample.recommendedH = 3944;
   gazeShmPublish(&channel, sample);
 
   GazeShm out{};
@@ -28,6 +30,8 @@ VRSFOV_TEST(gaze_shm_roundtrip) {
   CHECK_NEAR(out.u0, 0.25, 1e-6);
   CHECK_NEAR(out.v1, 0.70, 1e-6);
   CHECK_EQ(out.valid, 1u);
+  CHECK_EQ(out.recommendedW, 3944u);
+  CHECK_EQ(out.recommendedH, 3944u);
 }
 
 VRSFOV_TEST(gaze_shm_rejects_bad_record) {

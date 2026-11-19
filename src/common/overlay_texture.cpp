@@ -54,6 +54,33 @@ std::vector<uint8_t> buildRingTexture(const RingTextureParams& p) {
     return out;
   }
 
+  if (p.pattern == TexturePattern::Box) {
+    // Filled rectangle with a one-pixel soft edge, sized by radiusX/radiusY in
+    // texture fractions. The quad spans the eye's field of view, so the rectangle
+    // lands on the foveal area at the gaze.
+    const uint8_t cr = (uint8_t)std::lround(std::clamp(p.r, 0.0f, 1.0f) * 255.0f);
+    const uint8_t cg = (uint8_t)std::lround(std::clamp(p.g, 0.0f, 1.0f) * 255.0f);
+    const uint8_t cb = (uint8_t)std::lround(std::clamp(p.b, 0.0f, 1.0f) * 255.0f);
+    for (uint32_t y = 0; y < h; ++y) {
+      const float dy = (((float)y + 0.5f) - halfY) / halfY;
+      for (uint32_t x = 0; x < w; ++x) {
+        const float dx = (((float)x + 0.5f) - halfX) / halfX;
+        const float dn = std::max(std::fabs(dx) / rx, std::fabs(dy) / ry);
+        float alpha = 1.0f;
+        if (dn > 1.0f) {
+          alpha = 1.0f - std::fabs(dn - 1.0f) * std::min(rx, ry) / aa;
+          if (alpha <= 0.0f) continue;
+        }
+        uint8_t* texel = &out[((size_t)y * w + x) * 4];
+        texel[0] = cr;
+        texel[1] = cg;
+        texel[2] = cb;
+        texel[3] = (uint8_t)std::lround(std::clamp(p.a * alpha, 0.0f, 1.0f) * 255.0f);
+      }
+    }
+    return out;
+  }
+
   for (uint32_t y = 0; y < h; ++y) {
     const float dy = (((float)y + 0.5f) - halfY) / halfY;  // -1..1
     for (uint32_t x = 0; x < w; ++x) {

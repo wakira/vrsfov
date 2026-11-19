@@ -1,6 +1,8 @@
 // Command buffer hooks: per-command-buffer state, dynamic rendering injection
 // (05 §4) and the transfer-only rate image updates (05 §5).
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -189,6 +191,136 @@ uint32_t rateImageLayersFor(const DeviceData& data, const VkRenderingInfo* info)
   return 1;
 }
 
+std::vector<VkClearRect> buildPaintRects(const FoveationPlan& plan, const Snapshot& snap,
+                                         const Config& config, bool eyeTracked, uint32_t viewMask,
+                                         uint32_t layers, const VkRect2D& renderArea) {
+  std::vector<VkClearRect> rects;
+  if (!config.paintGaze || plan.regions.empty()) return rects;
+  // Paint only the image the compositor displays (an XR swapchain image) when we
+  // know the app's swapchains. Intermediates are copied into it - VTOL flips
+  // vertically at every hop (1810 -> 3620 -> swapchain) - so painting them too
+  // puts extra, mirrored markers into the final image. An upscale source is
+  // skipped for the same reason.
+  const bool haveSwapchains = snap.swapchainByVkImage && !snap.swapchainByVkImage->empty();
+  if (haveSwapchains && !plan.swapchainImageTarget) return rects;
+  if (plan.scaledTarget) return rects;
+  const float radius = eyeTracked ? config.innerRadius : config.fixedInnerRadius;
+
+  // Per-eye gaze, resolved once. The layered branch paints each eye at its own
+  // gaze; the diagnostic below reports them so a gaze source that tracks the two
+  // eyes differently is visible in the log.
+  float lu = 0.5f, lv = 0.5f, ru = 0.5f, rv = 0.5f;
+  bool tracked = false;
+  resolveEyeGaze(snap, lu, lv, ru, rv, tracked);
+
+  const int32_t raX0 = renderArea.offset.x;
+  const int32_t raY0 = renderArea.offset.y;
+  const int32_t raX1 = raX0 + (int32_t)renderArea.extent.width;
+  const int32_t raY1 = raY0 + (int32_t)renderArea.extent.height;
+
+  auto appendClamped = [&](const Region& r, uint32_t layer, float u, float v) {
+    VkClearRect cr{};
+    if (!gazeInnerBoxRect(r.x, r.y, r.w, r.h, layer, u, v, radius, config.horizontalScale, cr)) {
+      return;
+    }
+    const int32_t x0 = std::clamp(cr.rect.offset.x, raX0, raX1);
+    const int32_t y0 = std::clamp(cr.rect.offset.y, raY0, raY1);
+    const int32_t x1 = std::clamp(cr.rect.offset.x + (int32_t)cr.rect.extent.width, raX0, raX1);
+    const int32_t y1 = std::clamp(cr.rect.offset.y + (int32_t)cr.rect.extent.height, raY0, raY1);
+    if (x1 > x0 && y1 > y0) {
+      cr.rect.offset = {x0, y0};
+      cr.rect.extent = {(uint32_t)(x1 - x0), (uint32_t)(y1 - y0)};
+      rects.push_back(cr);
+    }
+  };
+
+  if (viewMask != 0) {
+    // Multiview: vkCmdClearAttachments broadcasts to all active views and
+    // requires baseArrayLayer=0, layerCount=1.
+    float u = 0.f, v = 0.f;
+    for (const Region& r : plan.regions) {
+      u += r.u;
+      v += r.v;
+    }
+    u /= (float)plan.regions.size();
+    v /= (float)plan.regions.size();
+    appendClamped(plan.regions[0], 0, u, v);
+  } else if (layers >= 2 && plan.regions.size() == 1) {
+    // Both eyes in one layered target without multiview (VTOL VR): the plan has a
+    // single region because one rate image layer is shared by every layer. Paint
+    // each layer at its own eye's gaze so both eyes show the marker.
+    const float gaze[2][2] = {{lu, lv}, {ru, rv}};
+    for (uint32_t l = 0; l < layers && l < 2; ++l) {
+      appendClamped(plan.regions[0], l, gaze[l][0], gaze[l][1]);
+    }
+  } else {
+    for (const Region& r : plan.regions) {
+      appendClamped(r, r.layer, r.u, r.v);
+    }
+  }
+
+  // VRSFOV_PAINT_GAZE is a debug switch, so a once-a-second report of the gaze
+  // and the rects is acceptable and is what makes a per-eye gaze problem (the
+  // two boxes drifting apart on pitch) diagnosable from the log.
+  static std::atomic<int64_t> lastPaintLogNs{0};
+  const int64_t now = nowNs();
+  int64_t last = lastPaintLogNs.load(std::memory_order_relaxed);
+  if (now - last > 1000LL * 1000 * 1000 &&
+      lastPaintLogNs.compare_exchange_strong(last, now, std::memory_order_relaxed)) {
+    std::string where;
+    for (const VkClearRect& cr : rects) {
+      char buf[72];
+      snprintf(buf, sizeof(buf), " [layer %u %dx%d %ux%u]", cr.baseArrayLayer, cr.rect.offset.x,
+               cr.rect.offset.y, cr.rect.extent.width, cr.rect.extent.height);
+      where += buf;
+    }
+    LOG_INFO("paint gaze: viewMask=0x%x layers=%u regions=%zu tracked=%d "
+             "eye L=(%.3f,%.3f) R=(%.3f,%.3f)%s",
+             viewMask, layers, plan.regions.size(), (int)tracked, (double)lu, (double)lv,
+             (double)ru, (double)rv, where.c_str());
+  }
+  return rects;
+}
+
+void paintGazeIfPending(VkCommandBuffer cmd, DeviceData& data) {
+  std::vector<VkClearRect> rects;
+  {
+    std::unique_lock<std::shared_mutex> lock(data.lock);
+    auto it = data.cmdStates.find(cmd);
+    if (it == data.cmdStates.end() || it->second.pendingPaintRects.empty()) return;
+    rects.swap(it->second.pendingPaintRects);
+  }
+  if (!data.d.CmdClearAttachments) return;
+  SharedState::get().stats.paintRecords.fetch_add(1, std::memory_order_relaxed);
+
+  // Green for layer 0 (left eye), red for layer 1 (right eye), so the two eyes
+  // stay distinguishable while this debug switch is on.
+  std::vector<VkClearRect> left, right;
+  for (const VkClearRect& r : rects) {
+    (r.baseArrayLayer == 1 ? right : left).push_back(r);
+  }
+
+  VkClearAttachment att{};
+  att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  att.colorAttachment = 0;
+  LOG_ONCE(INFO, "paint-gaze-first",
+           "VRSFOV_PAINT_GAZE active: painting %zu gaze box(es) at pass end (left/layer 0 "
+           "green, right/layer 1 red; first rect (%d,%d) %ux%u layer %u)",
+           rects.size(), rects[0].rect.offset.x, rects[0].rect.offset.y, rects[0].rect.extent.width,
+           rects[0].rect.extent.height, rects[0].baseArrayLayer);
+
+  auto clear = [&](std::vector<VkClearRect>& group, float r, float g, float b) {
+    if (group.empty()) return;
+    att.clearValue.color.float32[0] = r;
+    att.clearValue.color.float32[1] = g;
+    att.clearValue.color.float32[2] = b;
+    att.clearValue.color.float32[3] = 1.0f;
+    data.d.CmdClearAttachments(cmd, 1, &att, (uint32_t)group.size(), group.data());
+  };
+  clear(left, 0.0f, 1.0f, 0.0f);
+  clear(right, 1.0f, 0.0f, 0.0f);
+}
+
 // Shared body for vkCmdBeginRendering and its KHR alias.
 void beginRenderingImpl(VkCommandBuffer cmd, const VkRenderingInfo* info,
                         PFN_vkCmdBeginRendering next) {
@@ -219,9 +351,12 @@ void beginRenderingImpl(VkCommandBuffer cmd, const VkRenderingInfo* info,
   if (resuming) {
     VkImageView lastView = VK_NULL_HANDLE;
     {
-      std::shared_lock<std::shared_mutex> lock(data->lock);
+      std::unique_lock<std::shared_mutex> lock(data->lock);
       auto it = data->cmdStates.find(cmd);
-      if (it != data->cmdStates.end()) lastView = it->second.lastAttachedView;
+      if (it != data->cmdStates.end()) {
+        lastView = it->second.lastAttachedView;
+        it->second.pendingPaintRects = it->second.savedPaintRects;
+      }
     }
     if (lastView == VK_NULL_HANDLE) {
       LOG_ONCE(DEBUG, "skip-beginRendering-resume",
@@ -283,9 +418,16 @@ void beginRenderingImpl(VkCommandBuffer cmd, const VkRenderingInfo* info,
   fsr.pNext = const_cast<void*>(info->pNext);
   copy.pNext = &fsr;
 
-  if (suspending) {
+  if (suspending || config.paintGaze) {
+    std::vector<VkClearRect> paintRects = buildPaintRects(
+        plan, snap, config, eyeTracked, info->viewMask, info->layerCount, info->renderArea);
     std::unique_lock<std::shared_mutex> lock(data->lock);
-    data->cmdStates[cmd].lastAttachedView = img->view;
+    CmdState& st = data->cmdStates[cmd];
+    if (suspending) {
+      st.lastAttachedView = img->view;
+      st.savedPaintRects = paintRects;
+    }
+    st.pendingPaintRects = std::move(paintRects);
   }
 
   SharedState::get().stats.foveatedPasses.fetch_add(1, std::memory_order_relaxed);
@@ -360,6 +502,32 @@ VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRenderingKHR(VkCommandBuffer command
                                                         const VkRenderingInfo* pRenderingInfo) {
   DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
   beginRenderingImpl(commandBuffer, pRenderingInfo, data ? data->d.CmdBeginRenderingKHR : nullptr);
+}
+
+namespace {
+
+void endRenderingImpl(VkCommandBuffer cmd, PFN_vkCmdEndRendering next) {
+  DeviceData* data = findDeviceForCommandBuffer(cmd);
+  if (!data || !next) {
+    if (next) next(cmd);
+    return;
+  }
+  VRSFOV_GUARD_BEGIN
+  if (data->active) paintGazeIfPending(cmd, *data);
+  next(cmd);
+  VRSFOV_GUARD_END_VOID
+}
+
+}  // namespace
+
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRendering(VkCommandBuffer commandBuffer) {
+  DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
+  endRenderingImpl(commandBuffer, data ? data->d.CmdEndRendering : nullptr);
+}
+
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderingKHR(VkCommandBuffer commandBuffer) {
+  DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
+  endRenderingImpl(commandBuffer, data ? data->d.CmdEndRenderingKHR : nullptr);
 }
 
 namespace {
@@ -461,6 +629,13 @@ void beginRenderPassImpl(VkCommandBuffer cmd, const VkRenderPassBeginInfo* begin
       SharedState::get().stats.neutralPasses.fetch_add(1, std::memory_order_relaxed);
     } else {
       SharedState::get().stats.foveatedPasses.fetch_add(1, std::memory_order_relaxed);
+      if (config.paintGaze) {
+        std::vector<VkClearRect> paintRects = buildPaintRects(
+            plan, snap, config, eyeTracked, fb.rp.viewMaskUnion, fb.layers,
+            beginInfo->renderArea);
+        std::unique_lock<std::shared_mutex> lock(data->lock);
+        data->cmdStates[cmd].pendingPaintRects = std::move(paintRects);
+      }
       LOG_DEBUG("render pass %ux%u viewMask=0x%x: %zu region(s), attaching rate image "
                 "%ux%u texels x%u layer(s) (pattern rates: inner %s, middle %s, outer %s; "
                 "debugMode %d)",
@@ -512,6 +687,44 @@ VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRenderPass2KHR(
   DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
   beginRenderPassImpl(commandBuffer, pRenderPassBegin, pSubpassBeginInfo, VK_SUBPASS_CONTENTS_INLINE,
                       nullptr, data ? data->d.CmdBeginRenderPass2KHR : nullptr);
+}
+
+namespace {
+
+void endRenderPassImpl(VkCommandBuffer cmd, const VkSubpassEndInfo* endInfo,
+                       PFN_vkCmdEndRenderPass next1, PFN_vkCmdEndRenderPass2 next2) {
+  DeviceData* data = findDeviceForCommandBuffer(cmd);
+  if (!data || (!next1 && !next2)) {
+    if (next2) next2(cmd, endInfo);
+    else if (next1) next1(cmd);
+    return;
+  }
+  VRSFOV_GUARD_BEGIN
+  if (data->active) paintGazeIfPending(cmd, *data);
+  if (next2) next2(cmd, endInfo);
+  else next1(cmd);
+  VRSFOV_GUARD_END_VOID
+}
+
+}  // namespace
+
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
+  DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
+  endRenderPassImpl(commandBuffer, nullptr, data ? data->d.CmdEndRenderPass : nullptr, nullptr);
+}
+
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderPass2(VkCommandBuffer commandBuffer,
+                                                     const VkSubpassEndInfo* pSubpassEndInfo) {
+  DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
+  endRenderPassImpl(commandBuffer, pSubpassEndInfo, nullptr,
+                    data ? data->d.CmdEndRenderPass2 : nullptr);
+}
+
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer,
+                                                        const VkSubpassEndInfo* pSubpassEndInfo) {
+  DeviceData* data = findDeviceForCommandBuffer(commandBuffer);
+  endRenderPassImpl(commandBuffer, pSubpassEndInfo, nullptr,
+                    data ? data->d.CmdEndRenderPass2KHR : nullptr);
 }
 
 }  // namespace vrsfov

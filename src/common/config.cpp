@@ -99,7 +99,8 @@ const char* const kKeys[] = {
     "outer_rate",        "horizontal_scale",  "fixed_offset_x", "fixed_offset_y",
     "smoothing",         "gaze_yflip",        "preset",         "texel_size",
     "size_tolerance",    "min_size_ratio",    "standalone",     "eye_size",
-    "debug_mode",        "draw_radii",        "ring_width",     "log_level"};
+    "debug_mode",        "draw_radii",        "ring_width",     "paint_gaze",
+    "gaze_yflip_eye_images", "log_level"};
 
 bool knownKey(const std::string& k) {
   for (const char* known : kKeys) {
@@ -284,6 +285,9 @@ void applyConfigKey(Config& c, const std::string& keyIn, const std::string& valu
   } else if (key == "gaze_yflip") {
     if (!parseBool(value, b)) goto bad;
     c.gazeYFlip = b;
+  } else if (key == "gaze_yflip_eye_images") {
+    if (!parseBool(value, b)) goto bad;
+    c.gazeYFlipEyeImages = b;
   } else if (key == "preset") {
     const std::string v = toLower(trim(value));
     if (v == "lo" || v == "low" || v == "default") {
@@ -345,6 +349,9 @@ void applyConfigKey(Config& c, const std::string& keyIn, const std::string& valu
   } else if (key == "ring_width") {
     if (!parseUint(value, u)) goto bad;
     c.ringWidth = u;
+  } else if (key == "paint_gaze") {
+    if (!parseBool(value, b)) goto bad;
+    c.paintGaze = b;
   } else if (key == "log_level") {
     c.logLevel = toLower(trim(value));
   } else {
@@ -505,7 +512,7 @@ std::string configSummary(const Config& c) {
   snprintf(buf, sizeof(buf),
            "enabled=%d eye_tracking=%d standalone=%d eye_size=%s radii eye %.2f/%.2f fixed "
            "%.2f/%.2f rates %s/%s/%s hscale %.2f offset (%.2f,%.2f) smoothing %.2f "
-           "yflip=%d preset %s texel %u debug %d rings %s x%u",
+           "yflip=%d preset %s texel %u debug %d rings %s x%u paint_gaze=%d eye_flip=%d",
            (int)c.enabled, (int)c.eyeTracking, (int)c.standalone,
            c.eyeWidth ? (std::to_string(c.eyeWidth) + "x" + std::to_string(c.eyeHeight)).c_str()
                       : "auto",
@@ -513,7 +520,8 @@ std::string configSummary(const Config& c) {
            rateToString(c.innerRate).c_str(), rateToString(c.middleRate).c_str(),
            rateToString(c.outerRate).c_str(), c.horizontalScale, c.fixedOffsetX, c.fixedOffsetY,
            c.smoothing, (int)c.gazeYFlip, c.preset.c_str(), c.texelSize, c.debugMode,
-           drawRadiiName(c.drawRadii), c.ringWidth);
+           drawRadiiName(c.drawRadii), c.ringWidth, (int)c.paintGaze,
+           (int)c.gazeYFlipEyeImages);
   return buf;
 }
 

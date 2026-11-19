@@ -17,8 +17,10 @@ void unpackColor(uint32_t rgb, float alpha, float& r, float& g, float& b, float&
 // What to fill the texture with: the ring, or a diagnostic pattern that shows how
 // the quad maps its texture onto the screen (straight squares = correct mapping,
 // diagonal stripes or a diamond = something is off, and the extent shows the
-// quad's actual size and position).
-enum class TexturePattern { Ring = 0, Checker = 1, Solid = 2 };
+// quad's actual size and position). Box is a filled rectangle across the quad's
+// inner region: with the quad spanning the eye's field of view it lands on the
+// foveal area, at the gaze.
+enum class TexturePattern { Ring = 0, Checker = 1, Solid = 2, Box = 3 };
 
 struct RingTextureParams {
   TexturePattern pattern = TexturePattern::Ring;

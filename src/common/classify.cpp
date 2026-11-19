@@ -107,12 +107,15 @@ std::string sizeVerdict(uint32_t w, uint32_t h, const Snapshot& snap) {
 }
 
 void logOnceDecision(const TargetDesc& t, const FoveationPlan& plan) {
+  const uint64_t image = t.colorAttachments.empty() ? 0 : t.colorAttachments[0].vkImage;
   const std::string key = std::string("classify:") + std::to_string(t.width) + "x" +
                           std::to_string(t.height) + ":" + (t.source ? t.source : "") + ":" +
-                          (plan.regions.empty() ? "neutral" : "foveated") + ":" + plan.reason;
+                          (plan.regions.empty() ? "neutral" : "foveated") + ":" + plan.reason +
+                          ":" + std::to_string(image);
   LOG_ONCE(INFO, key.c_str(),
-           "render target %ux%u (%s, viewMask=0x%x layers=%u color=%d): %s (%s)", t.width, t.height,
-           t.source ? t.source : "framebuffer", t.viewMask, t.layers, (int)t.hasColor,
+           "render target %ux%u (%s, viewMask=0x%x layers=%u color=%d, image 0x%llx): %s (%s)",
+           t.width, t.height, t.source ? t.source : "framebuffer", t.viewMask, t.layers,
+           (int)t.hasColor, (unsigned long long)image,
            plan.regions.empty() ? "neutral" : "foveated", plan.reason.c_str());
 }
 
@@ -175,8 +178,33 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
   EyeGaze eyes[2];
   resolveGaze(snapshot, nowNs(), eyes);
 
+  // Some engines render the eye images into a low-resolution intermediate upside
+  // down and flip them when upscaling (VTOL VR: 1810 -> 3620). The fovea is then
+  // at 1 - v in that scaled target, so mirror the gaze for it - for foveation and
+  // for the paint marker alike. Swapchain images are in the display convention.
+  uint32_t refW = snapshot.recommendedW, refH = snapshot.recommendedH;
+  if (snapshot.slots) {
+    for (const ProjectionSlot& slot : *snapshot.slots) {
+      refW = std::max(refW, (uint32_t)std::max(0, slot.w));
+      refH = std::max(refH, (uint32_t)std::max(0, slot.h));
+    }
+  }
+  plan.scaledTarget = refW != 0 && target.width < refW;
+  auto mirrorIntermediate = [&](FoveationPlan& p) {
+    if (!cfg.gazeYFlipEyeImages || target.layers < 2 || !p.scaledTarget) return;
+    for (Region& r : p.regions) r.v = 1.f - r.v;
+  };
+
   // A. render target is an XR swapchain image.
   const uint32_t rateLayers = std::max(1u, rateImageLayers);
+  if (snapshot.swapchainByVkImage) {
+    for (const TargetAtt& att : target.colorAttachments) {
+      if (snapshot.swapchainByVkImage->find(att.vkImage) != snapshot.swapchainByVkImage->end()) {
+        plan.swapchainImageTarget = true;
+        break;
+      }
+    }
+  }
   if (snapshot.swapchainByVkImage && snapshot.slots) {
     for (const TargetAtt& att : target.colorAttachments) {
       auto it = snapshot.swapchainByVkImage->find(att.vkImage);
@@ -211,10 +239,33 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
       }
     }
     if (!plan.regions.empty()) {
+      plan.swapchainTarget = true;
       plan.reason = "xr swapchain image";
       logOnceDecision(target, plan);
       return plan;
     }
+  }
+
+  // The image belongs to a swapchain but no projection slot matches it yet: the
+  // app renders the next swapchain image before the frame that submitted the
+  // previous one has ended. Treat the whole target as the eye image (the same
+  // shape as case D) so foveation and the paint marker stay on for every frame
+  // instead of flipping on and off.
+  if (plan.swapchainImageTarget && target.width && target.height) {
+    const EyeGaze avg = averageGaze(eyes);
+    Region r;
+    r.layer = 0;
+    r.x = 0;
+    r.y = 0;
+    r.w = target.width;
+    r.h = target.height;
+    r.u = avg.u;
+    r.v = avg.v;
+    plan.regions.push_back(r);
+    plan.swapchainTarget = true;
+    plan.reason = "xr swapchain image (no fresh slot)";
+    logOnceDecision(target, plan);
+    return plan;
   }
 
   // B. multiview stereo.
@@ -243,6 +294,7 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
       r.v = avg.v;
       plan.regions.push_back(r);
     }
+    mirrorIntermediate(plan);
     plan.reason = "multiview stereo";
     logOnceDecision(target, plan);
     return plan;
@@ -282,6 +334,7 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
       right.v = eyes[1].v;
       plan.regions.push_back(left);
       plan.regions.push_back(right);
+      mirrorIntermediate(plan);
       plan.reason = "side-by-side";
       logOnceDecision(target, plan);
       return plan;
@@ -300,6 +353,7 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
     r.u = avg.u;
     r.v = avg.v;
     plan.regions.push_back(r);
+    mirrorIntermediate(plan);
     plan.reason = "eye-sized target";
     logOnceDecision(target, plan);
     return plan;
@@ -310,6 +364,17 @@ FoveationPlan planForTarget(const TargetDesc& target, const Snapshot& snapshot,
   }
   logOnceDecision(target, plan);
   return plan;
+}
+
+void resolveEyeGaze(const Snapshot& snapshot, float& leftU, float& leftV, float& rightU,
+                    float& rightV, bool& eyeTracked) {
+  EyeGaze eyes[2];
+  resolveGaze(snapshot, nowNs(), eyes);
+  leftU = eyes[0].u;
+  leftV = eyes[0].v;
+  rightU = eyes[1].u;
+  rightV = eyes[1].v;
+  eyeTracked = eyes[0].tracked && eyes[1].tracked;
 }
 
 }  // namespace vrsfov

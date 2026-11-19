@@ -39,6 +39,12 @@ struct Config {
   // Some stacks present the eye image flipped vertically relative to the gaze
   // convention (composition flip). Mirror v after projection.
   bool gazeYFlip = false;
+  // Some engines render the eye images into an intermediate layered target
+  // upside down and flip them when copying to the swapchain (VTOL VR does this).
+  // The fovea is then at 1 - v in that target, so both the foveation and the
+  // paint marker must be mirrored for it. Applies to layered eye targets that are
+  // not XR swapchain images; opt-in because it is app specific.
+  bool gazeYFlipEyeImages = false;
   // Named geometry preset matching Valve's FDM profiles: lo | med | hi.
   std::string preset = "lo";
   uint32_t texelSize = 0;  // 0 = auto
@@ -47,13 +53,19 @@ struct Config {
   // Generic fixed foveation for Vulkan apps without an OpenXR session (OpenVR
   // games, plain Vulkan apps): no per-eye knowledge, targets are matched by size.
   bool standalone = VRSFOV_DEFAULT_STANDALONE != 0;
-  uint32_t eyeWidth = 0, eyeHeight = 0;  // expected per-eye render size (0 = any)
+  // Expected per-eye render size. 0 = auto: for an OpenVR game with
+  // VRSFOV_OPENVR_GAZE=1, the out-of-process publisher's recommended size is
+  // used when it becomes available; otherwise any colour target is eligible.
+  uint32_t eyeWidth = 0, eyeHeight = 0;
   int debugMode = 0;  // 0 off, 1 = outer rate everywhere, 2 = inverted
   // Debug overlay: draw a thin band at each radius so the fovea can be found by
   // eye. It is a shading-rate band, not colour: the ring shows up as a line of
   // different sharpness. 0 off, 1 both, 2 inner only, 3 outer only.
   uint32_t drawRadii = 0;
   uint32_t ringWidth = 2;  // band width in rate-image texels
+  // Debug visual marker: clear the inner foveal box to solid green at the end of
+  // each foveated pass so the gaze area is unmistakably visible in-game.
+  bool paintGaze = false;
   std::string logLevel = "info";
   uint64_t generation = 0;  // bumped on every reload
 };

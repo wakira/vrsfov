@@ -208,4 +208,31 @@ VkBufferImageCopy toVkBufferImageCopy(const CopyRegion& r) {
   return c;
 }
 
+bool gazeInnerBoxRect(int32_t px, int32_t py, uint32_t pw, uint32_t ph, uint32_t layer, float u,
+                      float v, float innerRadius, float horizontalScale, VkClearRect& out) {
+  if (pw == 0 || ph == 0 || innerRadius <= 0.f) return false;
+  const float hscale = horizontalScale > 0.f ? horizontalScale : 1.f;
+  const float cx = (float)px + u * (float)pw;
+  const float cy = (float)py + v * (float)ph;
+  const float halfW = 0.5f * (float)pw * innerRadius * hscale;
+  const float halfH = 0.5f * (float)ph * innerRadius;
+
+  const int32_t right = px + (int32_t)pw;
+  const int32_t bottom = py + (int32_t)ph;
+  const int32_t x0 = std::clamp((int32_t)std::lround(cx - halfW), px, right);
+  const int32_t y0 = std::clamp((int32_t)std::lround(cy - halfH), py, bottom);
+  const int32_t x1 = std::clamp((int32_t)std::lround(cx + halfW), px, right);
+  const int32_t y1 = std::clamp((int32_t)std::lround(cy + halfH), py, bottom);
+  if (x1 <= x0 || y1 <= y0) return false;
+
+  out = VkClearRect{};
+  out.rect.offset.x = x0;
+  out.rect.offset.y = y0;
+  out.rect.extent.width = (uint32_t)(x1 - x0);
+  out.rect.extent.height = (uint32_t)(y1 - y0);
+  out.baseArrayLayer = layer;
+  out.layerCount = 1;
+  return true;
+}
+
 }  // namespace vrsfov

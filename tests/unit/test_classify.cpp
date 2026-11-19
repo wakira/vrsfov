@@ -58,6 +58,76 @@ VRSFOV_TEST(classify_multiview_stereo) {
   CHECK_NEAR(single.regions[0].v, 0.5, 1e-6);
 }
 
+// Some engines keep their intermediate eye images upside down and flip them when
+// copying to the swapchain (VTOL VR). gaze_yflip_eye_images mirrors the gaze for
+// such layered targets - but not for swapchain images or single-layer targets.
+VRSFOV_TEST(classify_mirrors_intermediate_eye_images) {
+  Snapshot s = makeSnapshot();
+  s.eyes[0] = EyeView{true, 0.25f, 0.20f, true};
+  s.eyes[1] = EyeView{true, 0.75f, 0.30f, true};  // average v = 0.25
+  Config cfg;
+  cfg.gazeYFlipEyeImages = true;
+  s.config = std::make_shared<const Config>(cfg);
+
+  TargetDesc layered = makeTarget(916, 960);  // half the 1832x1920 display size
+  layered.layers = 2;
+  FoveationPlan plan = planForTarget(layered, s, 1);
+  CHECK_EQ(plan.regions.size(), 1u);
+  CHECK(plan.scaledTarget);
+  CHECK(!plan.swapchainTarget);
+  CHECK_NEAR(plan.regions[0].v, 0.75, 1e-6);  // mirrored: 1 - 0.25
+
+  // A display-sized target is not mirrored: it is in the display convention.
+  TargetDesc display = makeTarget(1832, 1920);
+  display.layers = 2;
+  FoveationPlan full = planForTarget(display, s, 1);
+  CHECK(!full.scaledTarget);
+  CHECK_NEAR(full.regions[0].v, 0.25, 1e-6);
+
+  // A single-layer target is the final image, not an intermediate stereo array.
+  TargetDesc single = makeTarget(916, 960);
+  single.layers = 1;
+  FoveationPlan plain = planForTarget(single, s, 1);
+  CHECK_NEAR(plain.regions[0].v, 0.25, 1e-6);
+
+  // Off by default.
+  Config off;
+  s.config = std::make_shared<const Config>(off);
+  FoveationPlan unmirrored = planForTarget(layered, s, 1);
+  CHECK_NEAR(unmirrored.regions[0].v, 0.25, 1e-6);
+}
+
+// A swapchain image rendered before the frame that submitted the previous image
+// ended has no matching projection slot yet. It must still be treated as the
+// final eye image, otherwise foveation and the paint marker switch on and off on
+// alternate frames (VTOL under AFW does exactly this).
+VRSFOV_TEST(classify_swapchain_image_without_slots) {
+  Snapshot s = makeSnapshot();
+  SwapchainInfo info;
+  info.swapchain = 0x55;
+  info.width = 1832;
+  info.height = 1920;
+  info.arraySize = 2;
+  SwapchainMap map;
+  map[0xABC] = info;
+  s.swapchainByVkImage = std::make_shared<const SwapchainMap>(map);
+  s.slots = std::make_shared<const SlotList>();  // nothing submitted yet
+
+  TargetDesc t = makeTarget(1832, 1920);
+  t.layers = 2;
+  t.colorAttachments.push_back(TargetAtt{0xABC, 0, 2});
+  FoveationPlan plan = planForTarget(t, s, 1);
+  CHECK(plan.swapchainImageTarget);
+  CHECK(plan.swapchainTarget);
+  CHECK_EQ(plan.regions.size(), 1u);
+  CHECK_EQ(plan.regions[0].w, 1832u);
+  CHECK_EQ(plan.regions[0].h, 1920u);
+
+  // A plain intermediate of the same size is not a swapchain image.
+  FoveationPlan intermediate = planForTarget(makeTarget(1832, 1920), s, 1);
+  CHECK(!intermediate.swapchainImageTarget);
+}
+
 VRSFOV_TEST(classify_side_by_side) {
   Snapshot s = makeSnapshot();
   TargetDesc t = makeTarget(3664, 1920);

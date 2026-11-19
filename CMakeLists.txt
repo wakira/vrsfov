@@ -4,9 +4,8 @@ project(vrsfov VERSION 0.1.0 LANGUAGES CXX)
 
 # VRSFov: one shared core with two targets.
 #
-#   -D VRSFOV_PLATFORM=pc     Vulkan layer + OpenXR API layer, direct OpenVR gaze
-#   -D VRSFOV_PLATFORM=frame  Vulkan layer only, gaze from the vrsfov-gaze
-#                             publisher over /dev/shm
+#   -D VRSFOV_PLATFORM=pc     Vulkan layer + OpenXR API layer + out-of-process publisher
+#   -D VRSFOV_PLATFORM=frame  Vulkan layer only + out-of-process publisher
 #
 # The Vulkan core and the common modules are the same code in both builds; only
 # the activation default, gaze source and OpenXR half differ.
@@ -117,7 +116,7 @@ if(NOT VRSFOV_FRAME AND NOT VRSFOV_OPENVR_INCLUDE_DIR)
                       "needs it for the OpenXR gaze fallback")
 endif()
 if(VRSFOV_FRAME AND NOT VRSFOV_OPENVR_INCLUDE_DIR)
-  message(WARNING "OpenVR headers not found; vrsfov-gaze will not be built")
+  message(WARNING "OpenVR headers not found; SteamVR gaze will be unavailable")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -150,15 +149,11 @@ set(VRSFOV_OPENXR_SOURCES
   src/openxr/xr_gaze.cpp
   src/openxr/xr_pure.cpp)
 
-set(VRSFOV_LIB_SOURCES ${VRSFOV_COMMON_SOURCES} ${VRSFOV_VULKAN_SOURCES})
-if(VRSFOV_FRAME)
-  list(APPEND VRSFOV_LIB_SOURCES src/gaze/frame_gaze.cpp)
-else()
-  list(APPEND VRSFOV_LIB_SOURCES ${VRSFOV_OPENXR_SOURCES} src/gaze/pc_gaze.cpp
-       src/gaze/shm_gaze.cpp)
-  if(VRSFOV_OPENVR_INCLUDE_DIR)
-    list(APPEND VRSFOV_LIB_SOURCES src/common/openvr_gaze.cpp)
-  endif()
+set(VRSFOV_LIB_SOURCES ${VRSFOV_COMMON_SOURCES} ${VRSFOV_VULKAN_SOURCES}
+  src/gaze/shm_gaze.cpp
+  src/gaze/standalone_gaze.cpp)
+if(NOT VRSFOV_FRAME)
+  list(APPEND VRSFOV_LIB_SOURCES ${VRSFOV_OPENXR_SOURCES})
 endif()
 
 add_library(vrsfov SHARED ${VRSFOV_LIB_SOURCES})
@@ -182,7 +177,6 @@ if(VRSFOV_FRAME)
 else()
   target_compile_definitions(vrsfov PRIVATE VRSFOV_PLATFORM_FRAME=0 VRSFOV_DEFAULT_STANDALONE=0)
 endif()
-
 target_link_options(vrsfov PRIVATE
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map
   -Wl,-Bsymbolic
@@ -219,8 +213,8 @@ elseif(NOT VRSFOV_FRAME)
 endif()
 
 if(VRSFOV_OPENVR_INCLUDE_DIR)
-  # The only component that talks to SteamVR on the Frame, and the out-of-process
-  # fallback on PC. The layer reads the /dev/shm record this process publishes.
+  # The only component that talks to SteamVR. It runs as a separate process and
+  # publishes gaze + the recommended per-eye size over /dev/shm/vrsfov-gaze.
   add_executable(vrsfov-gaze
     tools/gaze/main.cpp
     src/common/openvr_gaze.cpp
@@ -230,6 +224,8 @@ if(VRSFOV_OPENVR_INCLUDE_DIR)
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_compile_options(vrsfov-gaze PRIVATE -Wall -Wextra)
   target_link_libraries(vrsfov-gaze PRIVATE dl pthread)
+else()
+  message(STATUS "vrsfov-gaze not built: OpenVR headers not found")
 endif()
 
 # ---------------------------------------------------------------------------

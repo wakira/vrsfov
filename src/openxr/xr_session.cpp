@@ -38,10 +38,12 @@ void xrMaybeLogStats(XrSessionData& session) {
   const double passes = (double)state.stats.passes.load(std::memory_order_relaxed);
   const double foveated = (double)state.stats.foveatedPasses.load(std::memory_order_relaxed);
   const double neutral = (double)state.stats.neutralPasses.load(std::memory_order_relaxed);
-  LOG_INFO("stats: %llu frames, %.1f passes/frame (%.1f foveated, %.1f neutral), eye tracking %s, "
-           "last gaze (%.3f, %.3f), session %s",
+  LOG_INFO("stats: %llu frames, %.1f passes/frame (%.1f foveated, %.1f neutral), %.2f painted "
+           "boxes/frame, eye tracking %s, last gaze (%.3f, %.3f), session %s",
            (unsigned long long)frames, frames > 0 ? passes / frames : 0.0,
            frames > 0 ? foveated / frames : 0.0, frames > 0 ? neutral / frames : 0.0,
+           frames > 0 ? (double)state.stats.paintRecords.load(std::memory_order_relaxed) / frames
+                      : 0.0,
            state.stats.eyeTracked.load() ? "active" : "unavailable",
            (double)state.stats.gazeU.load(), (double)state.stats.gazeV.load(),
            session.running ? "running" : "stopped");
@@ -208,6 +210,8 @@ void xrPublishSessionState(XrSessionData& session, XrInstanceData& instance) {
     snap.sessionRunning = running;
     snap.swapchainByVkImage = swapchains;
     snap.config = config;
+    snap.synthetic = false;
+    snap.anyDevice = false;
   });
 }
 
@@ -487,9 +491,25 @@ XRAPI_ATTR XrResult XRAPI_CALL vrsfov_xrEndFrame(XrSession session,
 
   if (instance.enabled && frameEndInfo) {
     SlotList slots;
-    if (extractProjectionSlots(*frameEndInfo, slots)) {
+    SubmittedView views[2];
+    if (extractProjectionSlots(*frameEndInfo, slots, views)) {
       auto published = std::make_shared<const SlotList>(slots);
       SharedState::get().update([&](Snapshot& snap) {
+        for (int eye = 0; eye < 2; ++eye) {
+          const SubmittedView& old = snap.submittedView[eye];
+          const SubmittedView& now = views[eye];
+          if (old.fov.valid != now.fov.valid || old.fov.left != now.fov.left ||
+              old.fov.right != now.fov.right || old.fov.up != now.fov.up ||
+              old.fov.down != now.fov.down || old.qx != now.qx || old.qy != now.qy ||
+              old.qz != now.qz || old.qw != now.qw) {
+            snap.submittedView[eye] = now;
+            LOG_DEBUG("submitted view eye %d: fov [%.3f %.3f %.3f %.3f] (valid %d) q[%.3f %.3f "
+                      "%.3f %.3f]",
+                      eye, (double)now.fov.left, (double)now.fov.right, (double)now.fov.up,
+                      (double)now.fov.down, (int)now.fov.valid, (double)now.qx, (double)now.qy,
+                      (double)now.qz, (double)now.qw);
+          }
+        }
         const SlotList& old = snap.slots ? *snap.slots : SlotList{};
         bool same = old.size() == slots.size();
         if (same) {

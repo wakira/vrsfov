@@ -264,3 +264,26 @@ VRSFOV_TEST(pattern_params_from_config) {
   CHECK_NEAR(fixed.outerRadius, 0.4, 1e-6);
   CHECK(!fixed.eyeTracked);
 }
+
+VRSFOV_TEST(pattern_gaze_inner_box_rect) {
+  VkClearRect cr{};
+  // 1000x1000 region at (0,0), centered gaze (0.5, 0.5), innerRadius = 0.2, hscale = 1.5
+  // -> halfW = 0.5 * 1000 * 0.2 * 1.5 = 150, halfH = 0.5 * 1000 * 0.2 = 100
+  // -> rect [350, 650) x [400, 600).
+  CHECK(gazeInnerBoxRect(0, 0, 1000, 1000, 1, 0.5f, 0.5f, 0.2f, 1.5f, cr));
+  CHECK_EQ(cr.rect.offset.x, 350);
+  CHECK_EQ(cr.rect.offset.y, 400);
+  CHECK_EQ(cr.rect.extent.width, 300u);
+  CHECK_EQ(cr.rect.extent.height, 200u);
+  CHECK_EQ(cr.baseArrayLayer, 1u);
+  CHECK_EQ(cr.layerCount, 1u);
+
+  // Near the left edge of a side-by-side right-eye region at x=1000: clamped to [1000, 2000).
+  CHECK(gazeInnerBoxRect(1000, 0, 1000, 1000, 0, 0.05f, 0.5f, 0.2f, 1.0f, cr));
+  CHECK_EQ(cr.rect.offset.x, 1000);
+  CHECK_EQ(cr.rect.extent.width, 150u);  // cx = 1050, halfW = 100 -> [1000, 1150)
+
+  // Degenerate inputs return false.
+  CHECK(!gazeInnerBoxRect(0, 0, 0, 1000, 0, 0.5f, 0.5f, 0.2f, 1.0f, cr));
+  CHECK(!gazeInnerBoxRect(0, 0, 1000, 1000, 0, 0.5f, 0.5f, 0.0f, 1.0f, cr));
+}

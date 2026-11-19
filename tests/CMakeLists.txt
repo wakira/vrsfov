@@ -121,37 +121,40 @@ if(VRSFOV_BUILD_GPU_TESTS)
     add_test(NAME xr_vk_e2e COMMAND xr_vk_e2e)
     set_tests_properties(xr_vk_e2e PROPERTIES
       ENVIRONMENT
-        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
+        "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
     # Same test with a runtime that has no eye gaze: fixed foveation fallback.
     add_test(NAME xr_vk_e2e_no_eye_gaze COMMAND xr_vk_e2e)
     set_tests_properties(xr_vk_e2e_no_eye_gaze PROPERTIES
       ENVIRONMENT
-        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_NO_EYE_GAZE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
+        "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_NO_EYE_GAZE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
     # Vulkan device before the XrInstance (as VTOL VR initialises): the layer must
     # activate late and still foveate at the gaze the runtime reports.
     add_test(NAME xr_vk_e2e_device_first COMMAND xr_vk_e2e)
     set_tests_properties(xr_vk_e2e_device_first PROPERTIES
       ENVIRONMENT
-        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_VK_DEVICE_FIRST=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
+        "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_VK_DEVICE_FIRST=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
     # The app never suggests /interaction_profiles/ext/eye_gaze_interaction: the
     # layer must still bind its action and follow the runtime's gaze.
     add_test(NAME xr_vk_e2e_no_app_gaze_suggest COMMAND xr_vk_e2e)
     set_tests_properties(xr_vk_e2e_no_app_gaze_suggest PROPERTIES
       ENVIRONMENT
-        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_NO_APP_GAZE_SUGGEST=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
+        "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_NO_APP_GAZE_SUGGEST=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
     # The app owns /user/eyes_ext/input/gaze_ext/pose: OpenXR forbids a second
     # binding for that path, so the layer must drive the app's action.
     add_test(NAME xr_vk_e2e_app_owns_gaze_binding COMMAND xr_vk_e2e)
     set_tests_properties(xr_vk_e2e_app_owns_gaze_binding PROPERTIES
       ENVIRONMENT
-        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_APP_OWNS_GAZE_BINDING=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
+        "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_E2E_APP_OWNS_GAZE_BINDING=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config;VRSFOV_INNER_RADIUS=0.15;VRSFOV_OUTER_RADIUS=0.30;VRSFOV_FIXED_INNER_RADIUS=0.15;VRSFOV_FIXED_OUTER_RADIUS=0.30")
   endif()
   endif()
 
 
   # Layer loading is opt-in and configured through the environment. The layer is
   # found through VK_LAYER_PATH pointing at the build's manifest directory.
+  # VK_LOADER_LAYERS_DISABLE=~implicit~ ensures an installed implicit copy in
+  # ~/.local/share/vulkan/implicit_layer.d does not shadow the build-dir layer.
   set(VRSFOV_GPU_TEST_ENV
+    "VK_LOADER_LAYERS_DISABLE=~implicit~"
     "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR}"
     "VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs"
     "VRSFOV_ENABLE=1"
@@ -166,6 +169,7 @@ if(VRSFOV_BUILD_GPU_TESTS)
   # Standalone fixed foveation for apps without OpenXR (OpenVR games, plain
   # Vulkan apps): no FORCE_ACTIVE, no FAKE_EYE, just the config.
   set(VRSFOV_STANDALONE_ENV
+    "VK_LOADER_LAYERS_DISABLE=~implicit~"
     "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR}"
     "VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs"
     "VRSFOV_ENABLE=1"
@@ -185,7 +189,7 @@ if(VRSFOV_BUILD_GPU_TESTS)
     add_test(NAME vk_vrs_test_frame_default COMMAND vk_vrs_test dynamic)
     set_tests_properties(vk_vrs_test_frame_default PROPERTIES
       ENVIRONMENT
-        "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_EYE_SIZE=1024x1024;VRSFOV_FIXED_INNER_RADIUS=0.25;VRSFOV_FIXED_OUTER_RADIUS=0.45;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config")
+        "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;VRSFOV_EYE_SIZE=1024x1024;VRSFOV_FIXED_INNER_RADIUS=0.25;VRSFOV_FIXED_OUTER_RADIUS=0.45;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config")
   endif()
 
   # draw_radii: the debug circles must appear in the rate map as a rate that is
@@ -195,6 +199,20 @@ if(VRSFOV_BUILD_GPU_TESTS)
     "VRSFOV_DRAW_RADII=both" "VRSFOV_RING_WIDTH=2" "VRSFOV_EXPECT_RING=1")
   add_test(NAME vk_vrs_test_draw_radii COMMAND vk_vrs_test dynamic)
   set_tests_properties(vk_vrs_test_draw_radii PROPERTIES ENVIRONMENT "${VRSFOV_STANDALONE_RING_ENV}")
+
+  # paint_gaze: with debug_mode=1 (outer rate everywhere), VRSFOV_PAINT_GAZE=1
+  # clears the inner gaze box at pass end so the center reads back as 0 while
+  # the periphery stays at the outer rate.
+  set(VRSFOV_STANDALONE_PAINT_ENV ${VRSFOV_STANDALONE_ENV}
+    "VRSFOV_DEBUG_MODE=1" "VRSFOV_PAINT_GAZE=1")
+  add_test(NAME vk_vrs_test_paint_gaze COMMAND vk_vrs_test dynamic)
+  set_tests_properties(vk_vrs_test_paint_gaze PROPERTIES ENVIRONMENT "${VRSFOV_STANDALONE_PAINT_ENV}")
+
+  # Same, on a 2-layer target without multiview (VTOL VR's eye layout): the box
+  # must be painted into both layers, not only the left eye.
+  add_test(NAME vk_vrs_test_paint_gaze_layered COMMAND vk_vrs_test layers2)
+  set_tests_properties(vk_vrs_test_paint_gaze_layered PROPERTIES
+    ENVIRONMENT "${VRSFOV_STANDALONE_PAINT_ENV};VRSFOV_EXPECT_PAINT=1")
 
   # Same through the config file, in an [exe:vk_vrs_test] section, so the
   # per-executable sections and the Vulkan half's own config loading are covered.
@@ -213,10 +231,10 @@ if(VRSFOV_BUILD_GPU_TESTS)
   add_test(NAME standalone_hot_reload
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/vk_vrs_test/standalone_hot_reload.sh)
   set_tests_properties(standalone_hot_reload PROPERTIES TIMEOUT 120
-    ENVIRONMENT "VRSFOV_TEST_BIN=${CMAKE_BINARY_DIR}/tests/vk_vrs_test;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs")
+    ENVIRONMENT "VK_LOADER_LAYERS_DISABLE=~implicit~;VRSFOV_TEST_BIN=${CMAKE_BINARY_DIR}/tests/vk_vrs_test;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs")
 
   add_test(NAME vk_vrs_test_standalone_file COMMAND vk_vrs_test dynamic)
   set_tests_properties(vk_vrs_test_standalone_file PROPERTIES
     ENVIRONMENT
-      "VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${VRSFOV_STANDALONE_CONFIG_HOME}")
+      "VK_LOADER_LAYERS_DISABLE=~implicit~;VK_LAYER_PATH=${VRSFOV_VK_MANIFEST_DIR};VK_INSTANCE_LAYERS=VK_LAYER_VRSFOV_vrs;VRSFOV_ENABLE=1;XDG_STATE_HOME=${CMAKE_BINARY_DIR}/test-state;XDG_CONFIG_HOME=${VRSFOV_STANDALONE_CONFIG_HOME}")
 endif()

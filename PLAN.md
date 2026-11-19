@@ -5,10 +5,11 @@ Implement the milestones in [`plan/07-milestones-and-testing.md`](plan/07-milest
 in order.
 
 Platforms: `-DVRSFOV_PLATFORM=pc` builds the Vulkan layer plus the OpenXR API layer and
-the direct OpenVR gaze source. `-DVRSFOV_PLATFORM=frame` builds the same Vulkan/common
-core without OpenXR, with `standalone = 1` as the default and the `/dev/shm` gaze
-publisher (`vrsfov-gaze`). The milestones below were written for the PC target; the
-Frame target reuses M0-M5, M7, M10 and the shared tests.
+the out-of-process `vrsfov-gaze` publisher. `-DVRSFOV_PLATFORM=frame` builds the same
+Vulkan/common core without OpenXR, with `standalone = 1` as the default and the same
+publisher. The publisher is only used by OpenVR games, never by OpenXR applications.
+The milestones below were written for the PC target; the Frame target reuses M0-M5,
+M7, M10 and the shared tests.
 
 Instructions for implementing agents:
 - Use one milestone per task or session. Before you start a milestone, reread the pitfalls checklist in 07.
@@ -175,27 +176,24 @@ run here. That is the remaining gap versus the plan's "hello_xr on a runtime" cr
     attached, `supportsEyeGazeInteraction` is true, and the action never becomes active - for a Proton
     game and for a native hello_xr alike. SteamVR's own eye tracking is exposed to the renderer
     instead (`IVRSystem::GetEyeTrackedFoveationCenter`, `Prop_SupportsXrEyeGazeInteraction_Bool`, both
-    public in the OpenVR SDK). The layer can therefore load `libopenvr_api.so` from the directory of
-    the `vrclient.so` already mapped into the process, initialise an "Other" client and read the
+    public in the OpenVR SDK). The out-of-process `vrsfov-gaze` publisher owns the OpenVR client
+    and publishes the per-eye foveation centre over `/dev/shm/vrsfov-gaze` (deviation 29). Read the
     per-eye foveation centre, which is a screen-space point and needs no projection: it replaces the
-    per-eye projection in `xrUpdateGaze` and is marked in the stats line as the OpenVR source. It is
-    opt-in (`VRSFOV_OPENVR_GAZE=1`) because it adds a second SteamVR client to the game's
-    process; `VRSFOV_OPENVR_CLIENT` selects the client type (2/other is the default because
-    SteamVR refuses eye-tracked data to background clients). The probe logs everything it
-    finds (`GetEyeTrackedFoveationCenter=ok|no data`) so the outcome is never ambiguous. Only the
-    OpenVR header is a build dependency (system include dir or a pinned download); the library is
-    `dlopen`ed, so the layer still works when it is absent. `openvrNdcToUv` (NDC, +y up ->
-    eye-image UV, v down) is unit tested.
+    per-eye projection and is marked in the stats line as the publisher source. It is opt-in
+    (`VRSFOV_OPENVR_GAZE=1`) and only used for OpenVR games. The publisher logs everything it finds
+    (`GetEyeTrackedFoveationCenter=ok|no data`) so the outcome is never ambiguous, and no OpenVR
+    IPC occurs on the render thread. Only the OpenVR header is a build dependency (system include
+    dir or a pinned download); the library is `dlopen`ed, so the layer still works when it is
+    absent. `openvrNdcToUv` (NDC, +y up -> eye-image UV, v down) is unit tested.
 24. **The SteamVR-native gaze source also covers standalone mode**: an OpenVR-only game never creates
     an `XrInstance`, so only standalone mode activates the Vulkan half - and previously that meant a
-    fixed spot in the middle of each eye. The OpenVR helper moved to `src/common/` and the Vulkan half
-    now polls it at ~120 Hz (same throttled `vkBeginCommandBuffer` call site as the standalone
-    config reload) when `VRSFOV_OPENVR_GAZE` is set, applies `smoothing`/`gaze_yflip`, and
-    publishes the result into
-    `Snapshot::eyes[]`. Per-eye rather than averaged, because the snapshot and `resolveGaze()` already
-    work per eye: per-eye/side-by-side targets get each eye's own centre and only a single-target pass
-    falls back to the average that `01 §...`/`classify` computes. `openvrGazePrepare()` is idempotent,
-    so a process that somehow ends up with both halves active still opens exactly one SteamVR client.
+    fixed spot in the middle of each eye. The layer now reads the out-of-process publisher's
+    seqlocked shared-memory record on the throttled `vkBeginCommandBuffer` call site, applies
+    `smoothing`/`gaze_yflip`, and publishes the result into `Snapshot::eyes[]`. Per-eye rather than
+    averaged, because the snapshot and `resolveGaze()` already work per eye: per-eye/side-by-side
+    targets get each eye's own centre and only a single-target pass falls back to the average that
+    `01 §...`/`classify` computes. The publisher samples at 60 Hz and the layer only does bounded
+    local reads; no OpenVR call is made in the game process.
 25. **OpenXR gaze binding was never suggested unless the app did it.** The action set was created and
     attached, but `xrSuggestInteractionProfileBindings` for
     `/interaction_profiles/ext/eye_gaze_interaction` was only called when the app itself suggested that
@@ -208,3 +206,33 @@ run here. That is the remaining gap versus the plan's "hello_xr on a runtime" cr
     `VK_LAYER_PATH`/`VK_INSTANCE_LAYERS`, `xr_layer_probe` sets `XR_API_LAYER_PATH`, and the hot-reload
     script takes the binary path from `VRSFOV_TEST_BIN`. No test depends on an installed layer, and
     the Vulkan loader no longer warns about the OpenXR manifest in its path.
+27. **OpenVR recommended eye size for auto `eye_size`.** Standalone mode had no equivalent of the
+    OpenXR `xrLocateViews` recommended image size, so leaving `eye_size` unset meant "every colour
+    target is an eye target". The out-of-process publisher calls
+    `IVRSystem::GetRecommendedRenderTargetSize()` after connecting and publishes the result into
+    `GazeShm`; the layer copies it into `Snapshot::recommendedW/H` when `eye_size` is `0`/`auto`.
+    An explicit `eye_size` always wins and the OpenXR path still uses `xrLocateViews`. This lets
+    OpenVR-only titles (X-Plane 11) keep the desktop mirror and HUD passes neutral without knowing
+    the per-eye resolution in advance. The query shares the existing `VRSFOV_OPENVR_GAZE=1` opt-in
+    and the OpenVR-game gate, so it never creates a SteamVR client for a plain standalone app.
+28. **Reuse-only in-process OpenVR worker (superseded).** The first in-process worker called
+    `VR_InitInternal` when no `IVRSystem` was available yet. On X-Plane 11 that succeeded, the
+    following `VR_GetGenericInterface` still failed with "Not Initialized (109)", and the
+    `OpenVrClient` destructor then called `VR_ShutdownInternal`; the cycle repeated every few
+    seconds. That competed with the game's own OpenVR client and froze the app. A reuse-only worker
+    (load the mapped `libopenvr_api.so`, call only `VR_GetGenericInterface`, never init/shutdown)
+    removed the freeze, but still calling `IVRSystem` from a second thread produced glitchy
+    overlays. The in-process path was therefore removed in favour of the publisher.
+29. **Out-of-process publisher restored; OpenVR games only.** `vrsfov-gaze` is again the only
+    process that talks to SteamVR. It creates a non-scene client (`VRSFOV_OPENVR_CLIENT`, default
+    2/other), polls `IVRSystem::GetEyeTrackedFoveationCenter` at 60 Hz and
+    `GetRecommendedRenderTargetSize()` once per connection, and publishes both over
+    `/dev/shm/vrsfov-gaze` (`GazeShm` version 2). The layer never loads `libopenvr_api.so`; it only
+    maps the shared-memory record. It writes `/dev/shm/vrsfov-gaze.want` only when **all** of these
+    hold: standalone mode is active, no OpenXR loader is mapped, no `XrInstance` exists, and
+    an OpenVR client (`vrclient.so` or Wine's `vrclient.dll`) is mapped. The
+    OpenXR path no longer falls back to OpenVR, so plain Vulkan and OpenXR applications never touch
+    the publisher. `run-pc.sh`/`run-frame.sh` start the publisher once (unless
+    `VRSFOV_START_GAZE=0`); it stays disconnected while the want file is stale.
+    `eye_tracking = 0` keeps the publisher's recommended size but skips the gaze,
+    which covers HMDs/runtimes that report a centre without real eye tracking.

@@ -40,8 +40,9 @@ Read the files in order:
 **One shared library** `libvrsfov.so`. On the PC target it is *both* an OpenXR API layer and a
 Vulkan layer; both manifests point to the same absolute path, so `dlopen` returns the same
 handle and both halves share globals (`SharedState`). On the Steam Frame target only the
-Vulkan half is built, and the gaze comes from the out-of-process `vrsfov-gaze` publisher.
-Log the address of the SharedState singleton from each half at init so this can be verified.
+Vulkan half is built, and the gaze comes from the out-of-process `vrsfov-gaze` publisher over
+`/dev/shm/vrsfov-gaze`. Log the address of the SharedState singleton from each half at init so
+this can be verified.
 
 - **OpenXR half** knows: the session's VkDevice, recommended eye sizes, swapchain VkImages,
   which swapchain/rect/array-slice is which eye (from `xrEndFrame`), per-eye FOV, and

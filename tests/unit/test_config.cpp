@@ -29,7 +29,8 @@ void clearEnv() {
       "outer_rate",        "horizontal_scale",  "fixed_offset_x", "fixed_offset_y",
       "smoothing",         "gaze_yflip",        "preset",         "texel_size",
       "size_tolerance",    "min_size_ratio",    "standalone",     "eye_size",
-      "debug_mode",        "draw_radii",        "ring_width",     "log_level"};
+      "debug_mode",        "draw_radii",        "ring_width",     "paint_gaze",
+      "gaze_yflip_eye_images", "log_level"};
   for (const char* k : keys) {
     std::string env = std::string("VRSFOV_") + k;
     for (auto& c : env) c = (char)toupper((unsigned char)c);
@@ -93,6 +94,8 @@ VRSFOV_TEST(config_key_application) {
   CHECK_EQ((int)c.outerRate.h, 1);
   applyConfigKey(c, "gaze_yflip", "yes", "test");
   CHECK(c.gazeYFlip);
+  applyConfigKey(c, "gaze_yflip_eye_images", "1", "test");
+  CHECK(c.gazeYFlipEyeImages);
   applyConfigKey(c, "preset", "hi", "test");
   CHECK_EQ(c.preset, std::string("hi"));
   applyConfigKey(c, "enabled", "off", "test");
@@ -140,15 +143,19 @@ VRSFOV_TEST(config_draw_radii) {
   clearEnv();
   setenv("VRSFOV_DRAW_RADII", "both", 1);
   setenv("VRSFOV_RING_WIDTH", "4", 1);
+  setenv("VRSFOV_PAINT_GAZE", "1", 1);
   Config e = loadConfig("", "", 1, "/nonexistent/vrsfov/settings.ini");
   CHECK_EQ(e.drawRadii, 1u);
   CHECK_EQ(e.ringWidth, 4u);
+  CHECK(e.paintGaze);
   clearEnv();
 
   // The summary mentions the overlay so it can be confirmed from the log.
   c.drawRadii = 1;
   c.ringWidth = 2;
+  c.paintGaze = true;
   CHECK(configSummary(c).find("rings both x2") != std::string::npos);
+  CHECK(configSummary(c).find("paint_gaze=1") != std::string::npos);
 }
 
 VRSFOV_TEST(config_standalone_and_eye_size) {

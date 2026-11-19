@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <unistd.h>
 
@@ -16,7 +17,7 @@
 namespace vrsfov {
 namespace {
 
-using InitInternalFn = void (*)(vr::EVRInitError*, vr::EVRApplicationType);
+using InitInternalFn = uint32_t (*)(vr::EVRInitError*, vr::EVRApplicationType);
 using ShutdownInternalFn = void (*)();
 using GetGenericInterfaceFn = void* (*)(const char*, vr::EVRInitError*);
 using ErrorDescriptionFn = const char* (*)(vr::EVRInitError);
@@ -28,6 +29,7 @@ GetGenericInterfaceFn g_getInterface = nullptr;
 ErrorDescriptionFn g_errorDescription = nullptr;  // optional, for readable logs
 const char* g_mode = "2";
 vr::IVRSystem* g_system = nullptr;
+bool g_initialized = false;
 bool g_prepared = false;
 bool g_available = false;
 std::string g_report;
@@ -36,36 +38,37 @@ struct ShutdownAtExit {
   ~ShutdownAtExit() { openvrGazeShutdown(); }
 } g_shutdownGuard;
 
-// Directory of the SteamVR install, taken from the vrclient.so already mapped into
-// this process (the OpenXR loader loaded it because SteamVR is the active
-// runtime). libopenvr_api.so belongs to the same install.
+// Directory of the SteamVR install. In the publisher process vrclient.so is not
+// mapped (there is no game in this process), so the usual SteamVR locations are
+// used unless VRSFOV_STEAMVR_DIR names one explicitly.
 std::string steamVrDirFromMaps() {
   FILE* f = fopen("/proc/self/maps", "r");
-  if (!f) return {};
-  char line[4096];
-  std::string found;
-  const char* needle = "vrclient.so";
-  const size_t needleLen = strlen(needle);
-  while (fgets(line, sizeof(line), f)) {
-    char* path = strchr(line, '/');
-    if (!path) continue;
-    std::string p(path);
-    while (!p.empty() && (p.back() == '\n' || p.back() == '\r' || p.back() == ' ')) p.pop_back();
-    const size_t cut = p.find(" (deleted)");
-    if (cut != std::string::npos) p.resize(cut);
-    if (p.size() >= needleLen && p.compare(p.size() - needleLen, needleLen, needle) == 0) {
-      found = p;
-      break;
+  if (f) {
+    char line[4096];
+    std::string found;
+    const char* needle = "vrclient.so";
+    const size_t needleLen = strlen(needle);
+    while (fgets(line, sizeof(line), f)) {
+      char* path = strchr(line, '/');
+      if (!path) continue;
+      std::string p(path);
+      while (!p.empty() && (p.back() == '\n' || p.back() == '\r' || p.back() == ' ')) {
+        p.pop_back();
+      }
+      const size_t cut = p.find(" (deleted)");
+      if (cut != std::string::npos) p.resize(cut);
+      if (p.size() >= needleLen && p.compare(p.size() - needleLen, needleLen, needle) == 0) {
+        found = p;
+        break;
+      }
+    }
+    fclose(f);
+    if (!found.empty()) {
+      const size_t slash = found.find_last_of('/');
+      if (slash != std::string::npos) return found.substr(0, slash);
     }
   }
-  fclose(f);
-  if (!found.empty()) {
-    const size_t slash = found.find_last_of('/');
-    if (slash != std::string::npos) return found.substr(0, slash);
-  }
 
-  // Out-of-process publisher on PC: vrclient.so is not mapped in this process.
-  // Try an explicit directory first, then the usual SteamVR locations.
   auto hasLibrary = [](const std::string& dir) {
     return !dir.empty() && access((dir + "/libopenvr_api.so").c_str(), R_OK) == 0;
   };
@@ -75,8 +78,11 @@ std::string steamVrDirFromMaps() {
   const char* home = getenv("HOME");
   const char* relative[] = {
       "/.local/share/Steam/steamapps/common/SteamVR/bin/linux64",
+      "/.local/share/Steam/steamapps/common/SteamVR/bin/linuxarm64",
       "/.steam/steam/steamapps/common/SteamVR/bin/linux64",
+      "/.steam/steam/steamapps/common/SteamVR/bin/linuxarm64",
       "/.steam/root/steamapps/common/SteamVR/bin/linux64",
+      "/.steam/root/steamapps/common/SteamVR/bin/linuxarm64",
   };
   if (home) {
     for (const char* rel : relative) {
@@ -96,6 +102,25 @@ std::string initErrorText(vr::EVRInitError e) {
   return std::string(s ? s : "unknown error") + " (" + std::to_string((int)e) + ")";
 }
 
+void resetClient() {
+  g_system = nullptr;
+  if (g_initialized && g_shutdown) {
+    g_shutdown();
+    g_shutdown = nullptr;
+  }
+  g_initialized = false;
+  g_init = nullptr;
+  g_shutdown = nullptr;
+  g_getInterface = nullptr;
+  g_errorDescription = nullptr;
+  if (g_library) {
+    dlclose(g_library);
+    g_library = nullptr;
+  }
+  g_available = false;
+  g_prepared = false;  // allow a later reconnect
+}
+
 }  // namespace
 
 bool openvrGazePrepare(std::string& report) {
@@ -107,9 +132,9 @@ bool openvrGazePrepare(std::string& report) {
 
   const std::string dir = steamVrDirFromMaps();
   if (dir.empty()) {
-    g_report = "no vrclient.so is mapped in this process, so this is not a SteamVR "
-               "session (nothing to load libopenvr_api.so from)";
+    g_report = "SteamVR libopenvr_api.so was not found (set VRSFOV_STEAMVR_DIR)";
     report = g_report;
+    resetClient();
     return false;
   }
   const std::string libPath = dir + "/libopenvr_api.so";
@@ -117,6 +142,7 @@ bool openvrGazePrepare(std::string& report) {
   if (!g_library) {
     g_report = "cannot load " + libPath + ": " + (dlerror() ? dlerror() : "?");
     report = g_report;
+    resetClient();
     return false;
   }
   g_init = reinterpret_cast<InitInternalFn>(dlsym(g_library, "VR_InitInternal"));
@@ -128,6 +154,7 @@ bool openvrGazePrepare(std::string& report) {
   if (!g_init || !g_shutdown || !g_getInterface) {
     g_report = "libopenvr_api.so has no VR_InitInternal/VR_GetGenericInterface";
     report = g_report;
+    resetClient();
     return false;
   }
 
@@ -153,12 +180,17 @@ bool openvrGazePrepare(std::string& report) {
     appType = vr::VRApplication_Utility;
   }
   vr::EVRInitError err = vr::VRInitError_None;
-  g_init(&err, appType);
+  // VR_InitInternal returns a VR token, not an EVRInitError. The error is
+  // reported through `err`; treating a nonzero token as failure leaves the
+  // publisher stuck at "No Error (0)" forever.
+  (void)g_init(&err, appType);
   if (err != vr::VRInitError_None) {
     g_report = "VR_InitInternal failed: " + initErrorText(err);
     report = g_report;
+    resetClient();
     return false;
   }
+  g_initialized = true;
 
   vr::EVRInitError ifaceErr = vr::VRInitError_None;
   void* iface = g_getInterface(vr::IVRSystem_Version, &ifaceErr);
@@ -166,6 +198,7 @@ bool openvrGazePrepare(std::string& report) {
     g_report = std::string("the runtime does not provide ") + vr::IVRSystem_Version + " (" +
                initErrorText(ifaceErr) + ")";
     report = g_report;
+    resetClient();
     return false;
   }
   g_system = static_cast<vr::IVRSystem*>(iface);
@@ -181,11 +214,13 @@ bool openvrGazePrepare(std::string& report) {
   vr::HmdVector2_t l{}, r{};
   const bool haveCentre = g_system->GetEyeTrackedFoveationCenter(&l, &r);
 
-  g_report = std::string("client type ") + g_mode + "; runtime " + (g_system->GetRuntimeVersion() ? g_system->GetRuntimeVersion() : "?") +
+  g_report = std::string("client type ") + g_mode + "; runtime " +
+             (g_system->GetRuntimeVersion() ? g_system->GetRuntimeVersion() : "?") +
              ", HMD '" + (model[0] ? model : "?") + "', " + vr::IVRSystem_Version +
              ", Prop_SupportsXrEyeGazeInteraction=" + (supports ? "true" : "false") +
              (pe == vr::TrackedProp_Success ? "" : " (property unsupported)") +
-             (haveCentre ? ", GetEyeTrackedFoveationCenter=ok" : ", GetEyeTrackedFoveationCenter=no data");
+             (haveCentre ? ", GetEyeTrackedFoveationCenter=ok"
+                         : ", GetEyeTrackedFoveationCenter=no data");
   g_available = true;
   report = g_report;
   return true;
@@ -200,21 +235,16 @@ bool openvrGazeRead(float& u0, float& v0, float& u1, float& v1) {
   return true;
 }
 
-void openvrGazeShutdown() {
-  g_system = nullptr;
-  if (g_shutdown) {
-    g_shutdown();
-    g_shutdown = nullptr;
-  }
-  g_init = nullptr;
-  g_getInterface = nullptr;
-  g_errorDescription = nullptr;
-  if (g_library) {
-    dlclose(g_library);
-    g_library = nullptr;
-  }
-  g_available = false;
-  g_prepared = false;  // allow a later reconnect
+bool openvrGazeRecommendedSize(uint32_t& width, uint32_t& height) {
+  if (!g_available || !g_system) return false;
+  uint32_t w = 0, h = 0;
+  g_system->GetRecommendedRenderTargetSize(&w, &h);
+  if (!w || !h) return false;
+  width = w;
+  height = h;
+  return true;
 }
+
+void openvrGazeShutdown() { resetClient(); }
 
 }  // namespace vrsfov

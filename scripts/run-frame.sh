@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Run a command (or Steam's %command%) with the Steam Frame layer from the build
-# tree. Starts vrsfov-gaze once if it is not already running (set
-# VRSFOV_START_GAZE=0 to leave the publisher alone).
+# tree.
 #
 #   scripts/run-frame.sh ./game
 #   scripts/run-frame.sh %command%       # Steam launch options
@@ -22,6 +21,8 @@ export VK_INSTANCE_LAYERS="VK_LAYER_VRSFOV_vrs${VK_INSTANCE_LAYERS:+:$VK_INSTANC
 export VRSFOV_ENABLE=1
 export VRSFOV_OPENVR_GAZE=1
 
+# The layer writes the want file only for OpenVR games (vrclient.so mapped, no
+# XrInstance); the publisher stays idle otherwise.
 if [[ "${VRSFOV_START_GAZE:-1}" != "0" && -x "$build/vrsfov-gaze" ]] &&
    ! pgrep -x vrsfov-gaze >/dev/null 2>&1; then
   state="${XDG_STATE_HOME:-$HOME/.local/state}/vrsfov"

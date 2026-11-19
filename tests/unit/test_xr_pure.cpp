@@ -72,10 +72,15 @@ VRSFOV_TEST(xr_pure_projection_slots) {
   views[0].subImage.swapchain = left;
   views[0].subImage.imageRect = {{0, 0}, {1832, 1920}};
   views[0].subImage.imageArrayIndex = 0;
+  views[0].fov = {-1.0f, 0.9f, 0.8f, -1.1f};
+  views[0].pose.orientation.w = 1.0f;
   views[1].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
   views[1].subImage.swapchain = right;
   views[1].subImage.imageRect = {{1832, 0}, {1832, 1920}};
   views[1].subImage.imageArrayIndex = 1;
+  // The right view submits a vertically flipped image: up is below down.
+  views[1].fov = {-0.9f, 1.0f, -1.1f, 0.8f};
+  views[1].pose.orientation.w = 1.0f;
 
   XrCompositionLayerProjection projection{};
   projection.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
@@ -101,6 +106,27 @@ VRSFOV_TEST(xr_pure_projection_slots) {
   CHECK_EQ(slots[1].swapchain, (uint64_t)0xBB);
   CHECK_EQ(slots[1].x, 1832);
   CHECK_EQ(slots[1].eye, 1u);
+
+  // The submitted per-view fov and orientation are reported alongside the slots:
+  // they are the mapping the compositor will use for the eye image, flipped or not.
+  SubmittedView submitted[2];
+  CHECK(extractProjectionSlots(end, slots, submitted));
+  CHECK(submitted[0].fov.valid);
+  CHECK_NEAR(submitted[0].fov.left, -1.0f, 1e-6);
+  CHECK_NEAR(submitted[0].fov.up, 0.8f, 1e-6);
+  CHECK_NEAR(submitted[0].fov.down, -1.1f, 1e-6);
+  CHECK(submitted[1].fov.valid);
+  CHECK_NEAR(submitted[1].fov.up, -1.1f, 1e-6);   // kept as submitted
+  CHECK_NEAR(submitted[1].fov.down, 0.8f, 1e-6);
+  CHECK_NEAR(submitted[1].qx, 0.0f, 1e-6);
+  CHECK_NEAR(submitted[1].qw, 1.0f, 1e-6);
+
+  // Degenerate fovs are reported as invalid rather than trusted.
+  views[0].fov = {0.f, 0.f, 0.f, 0.f};
+  CHECK(extractProjectionSlots(end, slots, submitted));
+  CHECK(!submitted[0].fov.valid);
+  CHECK(submitted[1].fov.valid);
+  views[0].fov = {-1.0f, 0.9f, 0.8f, -1.1f};
 
   // A single-view projection layer is not the main scene stereo layer.
   projection.viewCount = 1;

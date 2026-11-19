@@ -107,11 +107,6 @@ struct XrSessionData {
   bool gazeBindingsSuggested = false;
   bool gazeUnavailable = false;  // logged once
   bool syncedSinceLastGaze = false;
-  // Last eye-tracked foveation centre from the OpenVR source (see openvr_gaze.cpp),
-  // so a frame without a fresh sample does not snap the fovea back to the centre.
-  float openvrU[2] = {0.5f, 0.5f};
-  float openvrV[2] = {0.5f, 0.5f};
-  bool openvrHave = false;
 
   // VkImage -> swapchain, for the Vulkan half's classification.
   SwapchainMap imagesByVkImage;

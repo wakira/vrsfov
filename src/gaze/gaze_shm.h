@@ -24,10 +24,13 @@ struct GazeShm {
   uint32_t valid;     // 1 = this sample is usable
   uint32_t everValid; // 1 once any sample has been written
   uint32_t clientType;
+  // IVRSystem::GetRecommendedRenderTargetSize(): per-eye reference size for
+  // standalone classification. 0 = not known.
+  uint32_t recommendedW, recommendedH;
 };
 
 constexpr uint32_t kGazeMagic = 0x5a475646;  // 'FVGZ'
-constexpr uint32_t kGazeVersion = 1;
+constexpr uint32_t kGazeVersion = 2;
 constexpr const char *kGazeShmName = "/vrsfov-gaze";
 // Written by the layer whenever a game is rendering with gaze enabled. The
 // publisher connects to SteamVR only while this is fresh, so it never becomes a
@@ -47,6 +50,8 @@ inline void gazeShmPublish(GazeShm *s, const GazeShm &v) {
   s->valid = v.valid;
   s->everValid = v.everValid;
   s->clientType = v.clientType;
+  s->recommendedW = v.recommendedW;
+  s->recommendedH = v.recommendedH;
   __atomic_thread_fence(__ATOMIC_RELEASE);
   s->seq += 1;  // even: stable
 }

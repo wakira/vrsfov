@@ -33,6 +33,22 @@ struct SwapchainInfo {
   int64_t format = 0;
 };
 
+// The fov an app submits for a view in its projection layer (radians). This is
+// what the compositor uses to map the eye image onto the display, so it, not the
+// runtime's recommended fov, defines how the image maps to view directions. Some
+// apps submit something different from xrLocateViews' fov (a crop, a different
+// aspect, or a vertically flipped image).
+struct ViewFov {
+  float left = 0.f, right = 0.f, up = 0.f, down = 0.f;
+  bool valid = false;
+};
+
+// One view as the app submitted it: fov plus the orientation it rendered with.
+struct SubmittedView {
+  ViewFov fov;
+  float qx = 0.f, qy = 0.f, qz = 0.f, qw = 1.f;  // app-submitted orientation
+};
+
 using SwapchainMap = std::unordered_map<uint64_t, SwapchainInfo>;
 using SlotList = std::vector<ProjectionSlot>;
 
@@ -43,6 +59,9 @@ struct Snapshot {
   bool sessionRunning = false;
   uint32_t recommendedW = 0, recommendedH = 0;  // per-eye recommended size
   EyeView eyes[2];
+  // App-submitted projection view data (index 0 left, 1 right); fov.valid=false
+  // until the app has ended a frame.
+  SubmittedView submittedView[2];
   // Rebuilt only when they change; null means "empty".
   std::shared_ptr<const SlotList> slots;
   std::shared_ptr<const SwapchainMap> swapchainByVkImage;
@@ -62,6 +81,7 @@ struct Stats {
   std::atomic<uint64_t> passes{0};
   std::atomic<uint64_t> foveatedPasses{0};
   std::atomic<uint64_t> neutralPasses{0};
+  std::atomic<uint64_t> paintRecords{0};  // gaze boxes recorded into command buffers
   std::atomic<int> eyeTracked{0};
   std::atomic<float> gazeU{0.5f};
   std::atomic<float> gazeV{0.5f};

@@ -95,10 +95,16 @@ const NamedHook kDeviceHooks[] = {
     {"vkFreeCommandBuffers", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkFreeCommandBuffers)},
     {"vkCmdBeginRendering", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdBeginRendering)},
     {"vkCmdBeginRenderingKHR", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdBeginRenderingKHR)},
+    {"vkCmdEndRendering", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdEndRendering)},
+    {"vkCmdEndRenderingKHR", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdEndRenderingKHR)},
     {"vkCmdBeginRenderPass", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdBeginRenderPass)},
     {"vkCmdBeginRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdBeginRenderPass2)},
     {"vkCmdBeginRenderPass2KHR",
      reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdBeginRenderPass2KHR)},
+    {"vkCmdEndRenderPass", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdEndRenderPass)},
+    {"vkCmdEndRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdEndRenderPass2)},
+    {"vkCmdEndRenderPass2KHR",
+     reinterpret_cast<PFN_vkVoidFunction>(vrsfov_vkCmdEndRenderPass2KHR)},
 };
 
 PFN_vkVoidFunction lookup(const NamedHook* table, size_t count, const char* name) {

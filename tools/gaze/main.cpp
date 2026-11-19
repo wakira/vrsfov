@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
   int64_t lastLog = 0;
   int backoffMs = 500;
   int64_t lastStateLog = 0;
+  uint32_t recommendedW = 0, recommendedH = 0;
 
   // State transitions are always logged (they are rare and are the only way to
   // tell from the journal whether the publisher is idle or connected).
@@ -117,6 +118,7 @@ int main(int argc, char **argv) {
         v.clientType = shm->clientType;
         v.monoNs = now;
         vrsfov::gazeShmPublish(shm, v);
+        recommendedW = recommendedH = 0;
         fprintf(stderr, "vrsfov-gaze: disconnected (no game asked for gaze)\n");
       }
       usleep(250 * 1000);
@@ -137,6 +139,12 @@ int main(int argc, char **argv) {
       }
       connected = true;
       backoffMs = 500;
+      if (vrsfov::openvrGazeRecommendedSize(recommendedW, recommendedH)) {
+        fprintf(stderr, "vrsfov-gaze: recommended per-eye size %ux%u\n",
+                recommendedW, recommendedH);
+      } else {
+        recommendedW = recommendedH = 0;
+      }
       fprintf(stderr, "vrsfov-gaze: connected: %s\n", report.c_str());
     }
 
@@ -145,6 +153,8 @@ int main(int argc, char **argv) {
     v.version = vrsfov::kGazeVersion;
     v.clientType = shm->clientType;
     v.monoNs = now;
+    v.recommendedW = recommendedW;
+    v.recommendedH = recommendedH;
 
     float u0 = 0.f, v0 = 0.f, u1 = 0.f, v1 = 0.f;
     const bool ok = vrsfov::openvrGazeRead(u0, v0, u1, v1);

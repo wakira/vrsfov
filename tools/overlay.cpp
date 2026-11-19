@@ -64,6 +64,7 @@ struct Options {
   bool flipV = false;
   bool bgra = false;
   bool once = false;
+  bool box = false;            // solid gaze box instead of rings
   int test = 0;                // 0 ring, 1 checker, 2 solid
   std::string configPath;
 };
@@ -84,6 +85,8 @@ void printUsage() {
       "  --gaze on|off        move the ring to the eye-tracked fovea (default on)\n"
       "  --flip-v  --bgra     try these if the ring looks mirrored or its colour wrong\n"
       "  --config PATH        settings.ini to read the radii from (default: the layer's)\n"
+      "  --box                draw a solid gaze box at the inner radius (composited by\n"
+      "                       SteamVR, so it is steady even when the app alternates eyes)\n"
       "  --once               create the overlays, update once, print status, exit\n"
       "\n"
       "SteamVR must be running. Exits on Ctrl+C.\n");
@@ -137,6 +140,8 @@ int main(int argc, char** argv) {
       opt.bgra = true;
     } else if (argMatch(a, "--once")) {
       opt.once = true;
+    } else if (argMatch(a, "--box")) {
+      opt.box = true;
     } else if (argMatch(a, "--test")) {
       const char* v = next();
       if (v && strcmp(v, "checker") == 0) opt.test = 1;
@@ -221,8 +226,15 @@ int main(int argc, char** argv) {
   };
   Ring rings[2];
   size_t ringCount = 0;
-  if (inner > 0.f) rings[ringCount++] = {inner, opt.colorInner, vr::k_ulOverlayHandleInvalid};
-  if (outer > 0.f) rings[ringCount++] = {outer, opt.colorOuter, vr::k_ulOverlayHandleInvalid};
+  if (opt.box) {
+    // One overlay, the inner foveal area as a solid box. The compositor draws it
+    // over both eyes every frame, so it does not flicker when the game alternates
+    // or reprojects its eye images.
+    if (inner > 0.f) rings[ringCount++] = {inner, opt.colorInner, vr::k_ulOverlayHandleInvalid};
+  } else {
+    if (inner > 0.f) rings[ringCount++] = {inner, opt.colorInner, vr::k_ulOverlayHandleInvalid};
+    if (outer > 0.f) rings[ringCount++] = {outer, opt.colorOuter, vr::k_ulOverlayHandleInvalid};
+  }
 
   for (size_t i = 0; i < ringCount; ++i) {
     char key[64];
@@ -235,9 +247,10 @@ int main(int argc, char** argv) {
     vrsfov::RingTextureParams p;
     // The texture's aspect must match the quad's, or the ring is stretched: the
     // quad spans the eye's field of view, whose aspect is quadW x quadH.
-    p.pattern = opt.test == 1   ? vrsfov::TexturePattern::Checker
-                : opt.test == 2 ? vrsfov::TexturePattern::Solid
-                                : vrsfov::TexturePattern::Ring;
+    p.pattern = opt.box             ? vrsfov::TexturePattern::Box
+                : opt.test == 1     ? vrsfov::TexturePattern::Checker
+                : opt.test == 2     ? vrsfov::TexturePattern::Solid
+                                    : vrsfov::TexturePattern::Ring;
     p.width = 2048;
     p.height =
         (uint32_t)std::max(64.0f, std::min(4096.0f, roundf((float)p.width * quadH / quadW)));

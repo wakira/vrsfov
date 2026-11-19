@@ -35,9 +35,10 @@ void vrsfovMaybeReloadStandaloneConfig(DeviceData& data);
 // Late activation for a device created before the XrInstance (same call site and
 // throttle). No-op unless the device is waiting for an instance.
 void vrsfovMaybeActivate(DeviceData& data);
-// Standalone mode only: poll the platform's gaze source and publish it as the
-// shared snapshot's gaze. Implemented in src/gaze/pc_gaze.cpp or frame_gaze.cpp;
-// no-op unless VRSFOV_OPENVR_GAZE is set.
+// Standalone mode only: read the out-of-process publisher and publish its gaze
+// and recommended size into the shared snapshot. Implemented in
+// src/gaze/standalone_gaze.cpp; no-op unless this is an OpenVR game with
+// VRSFOV_OPENVR_GAZE enabled.
 void updateStandaloneGaze(DeviceData& data);
 void vrsfovMaybeUpdateStandaloneGaze(DeviceData& data);
 // Diagnostics: log the cumulative pipeline-injection counts at process exit.
@@ -100,6 +101,8 @@ VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRendering(VkCommandBuffer commandBuf
                                                      const VkRenderingInfo* pRenderingInfo);
 VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRenderingKHR(VkCommandBuffer commandBuffer,
                                                         const VkRenderingInfo* pRenderingInfo);
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRendering(VkCommandBuffer commandBuffer);
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderingKHR(VkCommandBuffer commandBuffer);
 VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRenderPass(VkCommandBuffer commandBuffer,
                                                       const VkRenderPassBeginInfo* pRenderPassBegin,
                                                       VkSubpassContents contents);
@@ -109,5 +112,10 @@ VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRenderPass2(
 VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdBeginRenderPass2KHR(
     VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
     const VkSubpassBeginInfo* pSubpassBeginInfo);
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderPass(VkCommandBuffer commandBuffer);
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderPass2(VkCommandBuffer commandBuffer,
+                                                     const VkSubpassEndInfo* pSubpassEndInfo);
+VKAPI_ATTR void VKAPI_CALL vrsfov_vkCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer,
+                                                        const VkSubpassEndInfo* pSubpassEndInfo);
 
 }  // namespace vrsfov

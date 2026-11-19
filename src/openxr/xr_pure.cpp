@@ -31,7 +31,7 @@ GraphicsBindingInfo findVulkanBinding(const void* pNext) {
   return out;
 }
 
-bool extractProjectionSlots(const XrFrameEndInfo& info, SlotList& out) {
+bool extractProjectionSlots(const XrFrameEndInfo& info, SlotList& out, SubmittedView views[2]) {
   out.clear();
   if (!info.layers) return false;
   for (uint32_t i = 0; i < info.layerCount; ++i) {
@@ -51,6 +51,22 @@ bool extractProjectionSlots(const XrFrameEndInfo& info, SlotList& out) {
       slot.h = sub.imageRect.extent.height;
       slot.eye = v;
       out.push_back(slot);
+      if (views && v < 2) {
+        const XrCompositionLayerProjectionView& pv = projection->views[v];
+        const XrFovf& f = pv.fov;
+        views[v].fov.left = f.angleLeft;
+        views[v].fov.right = f.angleRight;
+        views[v].fov.up = f.angleUp;
+        views[v].fov.down = f.angleDown;
+        views[v].fov.valid = std::isfinite(f.angleLeft) && std::isfinite(f.angleRight) &&
+                             std::isfinite(f.angleUp) && std::isfinite(f.angleDown) &&
+                             std::fabs(f.angleUp - f.angleDown) > 1e-4f &&
+                             std::fabs(f.angleRight - f.angleLeft) > 1e-4f;
+        views[v].qx = pv.pose.orientation.x;
+        views[v].qy = pv.pose.orientation.y;
+        views[v].qz = pv.pose.orientation.z;
+        views[v].qw = pv.pose.orientation.w;
+      }
     }
     return true;  // only the first projection layer
   }

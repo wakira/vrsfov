@@ -6,6 +6,33 @@
 
 using namespace vrsfov;
 
+VRSFOV_TEST(overlay_box_texture) {
+  RingTextureParams p;
+  p.pattern = TexturePattern::Box;
+  p.width = 256;
+  p.height = 256;
+  p.radiusX = 0.25f;
+  p.radiusY = 0.25f;
+  p.r = 0.f;
+  p.g = 1.f;
+  p.b = 0.f;
+  p.a = 1.f;
+  const std::vector<uint8_t> tex = buildRingTexture(p);
+  auto alphaAt = [&](uint32_t x, uint32_t y) { return tex[((size_t)y * 256 + x) * 4 + 3]; };
+  auto greenAt = [&](uint32_t x, uint32_t y) { return tex[((size_t)y * 256 + x) * 4 + 1]; };
+
+  // Filled inside the rectangle (0.25 of the half texture = 32 px from centre),
+  // transparent outside it.
+  CHECK_EQ(alphaAt(128, 128), 255);
+  CHECK_EQ(greenAt(128, 128), 255);
+  CHECK_EQ(alphaAt(128 + 30, 128), 255);
+  CHECK_EQ(alphaAt(128, 128 + 30), 255);
+  CHECK_EQ(alphaAt(0, 0), 0);
+  CHECK_EQ(alphaAt(255, 255), 0);
+  CHECK_EQ(alphaAt(128 + 40, 128), 0);
+  CHECK_EQ(alphaAt(128, 128 + 40), 0);
+}
+
 VRSFOV_TEST(overlay_ring_texture) {
   RingTextureParams p;
   p.width = 256;
