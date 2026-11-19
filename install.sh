@@ -3,7 +3,7 @@
 #
 #   ./install.sh                  # Build & install PC target (default)
 #   ./install.sh --pc             # Build & install PC target (Vulkan + OpenXR layers + vrsfov-gaze service)
-#   ./install.sh --frame          # Build & install Steam Frame target (Vulkan layer + vrsfov-gaze service)
+#   ./install.sh --frame          # Build & install Steam Frame target (Vulkan + OpenXR layers + vrsfov-gaze service)
 #   ./install.sh --uninstall      # Remove installed layers, binaries, and stop the gaze service
 #
 # Installed locations:
@@ -13,7 +13,7 @@
 #   ~/.local/bin/vrsfov-gaze              (symlink)
 #   ~/.local/bin/vrsfov-overlay           (symlink, when installed)
 #   ~/.local/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json
-#   ~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json  (PC target)
+#   ~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json
 #   ~/.config/systemd/user/vrsfov-gaze.service
 set -euo pipefail
 
@@ -110,21 +110,26 @@ build_project() {
   if command -v ninja >/dev/null 2>&1 && [[ ! -f "$build_dir/Makefile" ]]; then
     cmake_args+=(-GNinja)
   fi
-  if [[ -n "${VRSFOV_USE_SYSTEM_HEADERS:-}" ]]; then
-    cmake_args+=("-DVRSFOV_USE_SYSTEM_HEADERS=${VRSFOV_USE_SYSTEM_HEADERS}")
-  fi
+  # Forward explicit dependency/option overrides (system headers, vendored
+  # includes, a Vulkan-only build, ...). An existing cache keeps its values for
+  # everything that is not passed here, so re-running is safe.
+  local var
+  for var in VRSFOV_USE_SYSTEM_HEADERS VRSFOV_BUILD_OPENXR \
+             VRSFOV_VULKAN_INCLUDE_DIR VRSFOV_OPENXR_INCLUDE_DIR \
+             VRSFOV_OPENVR_INCLUDE_DIR VRSFOV_OPENVR_LIBRARY_DIR \
+             VRSFOV_OPENVR_LIBRARY; do
+    if [[ -n "${!var:-}" ]]; then
+      cmake_args+=("-D${var}=${!var}")
+    fi
+  done
 
   echo "==> Building VRSFov ($platform) in $build_dir..."
   if command -v cmake >/dev/null 2>&1; then
-    if [[ ! -f "$build_dir/CMakeCache.txt" ]]; then
-      cmake "${cmake_args[@]}"
-    fi
+    cmake "${cmake_args[@]}"
     cmake --build "$build_dir"
   elif command -v nix >/dev/null 2>&1 && [[ -f "$here/flake.nix" ]]; then
     nix develop "$here" --command bash -c "
-      if [[ ! -f '$build_dir/CMakeCache.txt' ]]; then
-        cmake -B '$build_dir' -S '$here' -GNinja -DVRSFOV_PLATFORM='$platform' -DVRSFOV_USE_SYSTEM_HEADERS=ON
-      fi
+      cmake $(printf '%q ' "${cmake_args[@]}")
       cmake --build '$build_dir'
     "
   else
@@ -178,7 +183,7 @@ cat > "$vk_manifest" <<EOF
 }
 EOF
 
-if [[ "$platform" == "pc" ]]; then
+if [[ -f "$build_dir/manifests/openxr/XrApiLayer_vrsfov.json" ]]; then
   echo "==> Installing implicit OpenXR API layer manifest to $xr_manifest..."
   mkdir -p "$xr_layer_dir"
   cat > "$xr_manifest" <<EOF
@@ -196,7 +201,8 @@ if [[ "$platform" == "pc" ]]; then
 }
 EOF
 else
-  # Steam Frame target has no OpenXR layer half; ensure no stale PC OpenXR manifest remains.
+  # OpenXR half not built (VRSFOV_BUILD_OPENXR=OFF): drop a stale manifest so the
+  # loader does not try to open a library that no longer exports the layer.
   rm -f "$xr_manifest"
 fi
 
@@ -239,7 +245,7 @@ echo ""
 echo "==> VRSFov ($platform) installed!"
 echo "    Library:        $install_dir/libvrsfov.so"
 echo "    Vulkan layer:   $vk_manifest"
-if [[ "$platform" == "pc" ]]; then
+if [[ -f "$xr_manifest" ]]; then
   echo "    OpenXR layer:   $xr_manifest"
 fi
 if [[ -x "$install_dir/vrsfov-gaze" ]]; then

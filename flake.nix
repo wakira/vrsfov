@@ -18,15 +18,15 @@
           "-DVRSFOV_BUILD_TESTS=OFF"
           "-DVRSFOV_BUILD_GPU_TESTS=OFF"
           "-DVRSFOV_VULKAN_INCLUDE_DIR=${pkgs.vulkan-headers}/include"
+          "-DVRSFOV_OPENXR_INCLUDE_DIR=${pkgs.openxr-loader.dev}/include"
           "-DVRSFOV_OPENVR_INCLUDE_DIR=${pkgs.openvr}/include"
           "-DVRSFOV_OPENVR_LIBRARY=${pkgs.openvr}/lib/libopenvr_api.so"
-        ] ++ pkgs.lib.optionals (platform == "pc") [
-          "-DVRSFOV_OPENXR_INCLUDE_DIR=${pkgs.openxr-loader.dev}/include"
         ];
         installPhase = ''
           runHook preInstall
           mkdir -p $out/lib $out/bin \
-            $out/share/vulkan/implicit_layer.d
+            $out/share/vulkan/implicit_layer.d \
+            $out/share/openxr/1/api_layers/implicit.d
           cp libvrsfov.so $out/lib/
           cp vrsfov-gaze $out/bin/
           if [ -f vrsfov-overlay ]; then
@@ -35,12 +35,9 @@
           substitute $src/manifests/VkLayer_vrsfov.json.in \
             $out/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json \
             --replace-fail "@VRSFOV_LIBRARY_PATH@" "$out/lib/libvrsfov.so"
-          if [ "${platform}" = "pc" ]; then
-            mkdir -p $out/share/openxr/1/api_layers/implicit.d
-            substitute $src/manifests/XrApiLayer_vrsfov.json.in \
-              $out/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json \
-              --replace-fail "@VRSFOV_LIBRARY_PATH@" "$out/lib/libvrsfov.so"
-          fi
+          substitute $src/manifests/XrApiLayer_vrsfov.json.in \
+            $out/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json \
+            --replace-fail "@VRSFOV_LIBRARY_PATH@" "$out/lib/libvrsfov.so"
           runHook postInstall
         '';
       };

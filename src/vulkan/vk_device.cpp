@@ -380,6 +380,14 @@ void installSyntheticSnapshot(DeviceData& data, const Config& cfg) {
   const char* spec = getenv("VRSFOV_FAKE_EYE");
   const bool haveFakeEye = spec && *spec;
   if (!haveFakeEye && !cfg.standalone && !data.standalone) return;
+  // An OpenXR application owns the snapshot: the OpenXR half publishes per-eye
+  // gaze, the session device and the config. The Frame defaults to standalone=1,
+  // so a synthetic snapshot here would overwrite that with a fixed centre. Only
+  // install one while no XrInstance exists; VRSFOV_FAKE_EYE stays a debug override.
+  if (!haveFakeEye && SharedState::get().liveXrInstances.load() > 0) {
+    LOG_DEBUG("standalone: an XrInstance exists; leaving the OpenXR snapshot alone");
+    return;
+  }
 
   uint32_t w = cfg.eyeWidth, h = cfg.eyeHeight;
   if (haveFakeEye && (sscanf(spec, "%ux%u", &w, &h) != 2 || w == 0 || h == 0)) {
@@ -434,6 +442,11 @@ void installSyntheticSnapshot(DeviceData& data, const Config& cfg) {
 // Standalone mode has no OpenXR half to hot reload the config, so the Vulkan half
 // does it while recording (throttled to once per second by the caller).
 void reloadStandaloneConfig(DeviceData& data) {
+  // While an XrInstance exists the OpenXR half hot-reloads the config and owns
+  // the shared snapshot (session device, gaze, projection slots). Reloading the
+  // standalone config then must not publish a synthetic snapshot or flip
+  // sessionRunning, or an OpenXR game on the Frame would lose its gaze.
+  if (SharedState::get().liveXrInstances.load() > 0) return;
   const int64_t now = nowNs();
   if (now - data.lastConfigCheckNs < 1000LL * 1000 * 1000) return;
   data.lastConfigCheckNs = now;

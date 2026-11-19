@@ -5,10 +5,12 @@ project(vrsfov VERSION 0.1.0 LANGUAGES CXX)
 # VRSFov: one shared core with two targets.
 #
 #   -D VRSFOV_PLATFORM=pc     Vulkan layer + OpenXR API layer + out-of-process publisher
-#   -D VRSFOV_PLATFORM=frame  Vulkan layer only + out-of-process publisher
+#   -D VRSFOV_PLATFORM=frame  Vulkan layer + OpenXR API layer + out-of-process publisher;
+#                             standalone mode (fixed foveation without an XrInstance) is
+#                             the default, so OpenVR games work out of the box
 #
 # The Vulkan core and the common modules are the same code in both builds; only
-# the activation default, gaze source and OpenXR half differ.
+# the activation default and the gaze source differ.
 
 set(VRSFOV_PLATFORM "pc" CACHE STRING "Target platform: pc or frame")
 set_property(CACHE VRSFOV_PLATFORM PROPERTY STRINGS pc frame)
@@ -22,6 +24,14 @@ endif()
 
 option(VRSFOV_BUILD_TESTS "Build the unit tests" ON)
 option(VRSFOV_BUILD_GPU_TESTS "Build the GPU end-to-end test app" ON)
+# The OpenXR half is what supplies per-eye gaze for OpenXR applications. It is
+# always built on PC; the Frame needs it too so OpenXR games (Beat Saber over
+# wineopenxr) get XR_EXT_eye_gaze_interaction instead of only fixed foveation.
+option(VRSFOV_BUILD_OPENXR "Build the OpenXR API layer half" ON)
+set(VRSFOV_OPENXR FALSE)
+if(NOT VRSFOV_FRAME OR VRSFOV_BUILD_OPENXR)
+  set(VRSFOV_OPENXR TRUE)
+endif()
 option(VRSFOV_USE_SYSTEM_HEADERS "Use system Vulkan/OpenXR headers instead of FetchContent" OFF)
 # The Nix dev shell exports this, so `cmake -B build` works there as documented.
 if(DEFINED ENV{VRSFOV_USE_SYSTEM_HEADERS} AND NOT VRSFOV_USE_SYSTEM_HEADERS)
@@ -53,7 +63,7 @@ if(VRSFOV_USE_SYSTEM_HEADERS)
   if(NOT VRSFOV_VK_LAYER_HEADER)
     message(FATAL_ERROR "vulkan/vk_layer.h not found in ${VRSFOV_VULKAN_INCLUDE_DIR}")
   endif()
-  if(NOT VRSFOV_FRAME)
+  if(VRSFOV_OPENXR)
     find_path(VRSFOV_OPENXR_INCLUDE_DIR openxr/openxr.h
       HINTS ENV VRSFOV_OPENXR_INCLUDE_DIR PATH_SUFFIXES include)
     if(NOT VRSFOV_OPENXR_INCLUDE_DIR)
@@ -73,7 +83,7 @@ else()
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
     GIT_TAG v1.3.280
     SOURCE_SUBDIR header-only)
-  if(NOT VRSFOV_FRAME)
+  if(VRSFOV_OPENXR)
     FetchContent_Declare(openxr_sdk
       GIT_REPOSITORY https://github.com/KhronosGroup/OpenXR-SDK.git
       GIT_TAG release-1.0.34
@@ -152,7 +162,7 @@ set(VRSFOV_OPENXR_SOURCES
 set(VRSFOV_LIB_SOURCES ${VRSFOV_COMMON_SOURCES} ${VRSFOV_VULKAN_SOURCES}
   src/gaze/shm_gaze.cpp
   src/gaze/standalone_gaze.cpp)
-if(NOT VRSFOV_FRAME)
+if(VRSFOV_OPENXR)
   list(APPEND VRSFOV_LIB_SOURCES ${VRSFOV_OPENXR_SOURCES})
 endif()
 
@@ -186,7 +196,7 @@ target_link_libraries(vrsfov PRIVATE dl pthread)
 
 # Per-half log tags ([xr] / [vk]).
 foreach(src IN LISTS VRSFOV_OPENXR_SOURCES)
-  if(NOT VRSFOV_FRAME)
+  if(VRSFOV_OPENXR)
     set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS "VRSFOV_LOG_TAG=\"xr\"")
   endif()
 endforeach()
@@ -238,7 +248,7 @@ file(MAKE_DIRECTORY ${VRSFOV_VK_MANIFEST_DIR})
 configure_file(manifests/VkLayer_vrsfov.json.in
   ${VRSFOV_VK_MANIFEST_DIR}/VkLayer_vrsfov.json @ONLY)
 
-if(NOT VRSFOV_FRAME)
+if(VRSFOV_OPENXR)
   set(VRSFOV_XR_MANIFEST_DIR ${VRSFOV_MANIFEST_DIR}/openxr)
   file(MAKE_DIRECTORY ${VRSFOV_XR_MANIFEST_DIR})
   configure_file(manifests/XrApiLayer_vrsfov.json.in
@@ -258,6 +268,6 @@ endif()
 
 message(STATUS "vrsfov: platform: ${VRSFOV_PLATFORM}")
 message(STATUS "vrsfov: Vulkan headers: ${VRSFOV_VULKAN_INCLUDE_DIR}")
-if(NOT VRSFOV_FRAME)
+if(VRSFOV_OPENXR)
   message(STATUS "vrsfov: OpenXR headers: ${VRSFOV_OPENXR_INCLUDE_DIR}")
 endif()

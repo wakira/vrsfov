@@ -9,7 +9,7 @@ set(VRSFOV_TEST_COMMON_SOURCES
   ${CMAKE_SOURCE_DIR}/src/common/overlay_texture.cpp
   ${CMAKE_SOURCE_DIR}/src/common/renderpass_convert.cpp
   ${CMAKE_SOURCE_DIR}/src/common/spirv_scan.cpp)
-if(NOT VRSFOV_FRAME)
+if(VRSFOV_OPENXR)
   list(APPEND VRSFOV_TEST_COMMON_SOURCES ${CMAKE_SOURCE_DIR}/src/openxr/xr_pure.cpp)
 endif()
 
@@ -24,7 +24,7 @@ set(VRSFOV_UNIT_SOURCES
   unit/test_overlay_texture.cpp
   unit/test_renderpass_convert.cpp
   unit/test_spirv_scan.cpp)
-if(NOT VRSFOV_FRAME)
+if(VRSFOV_OPENXR)
   list(APPEND VRSFOV_UNIT_SOURCES unit/test_xr_pure.cpp)
 endif()
 
@@ -32,7 +32,7 @@ add_executable(vrsfov_unit_tests ${VRSFOV_UNIT_SOURCES} ${VRSFOV_TEST_COMMON_SOU
 target_include_directories(vrsfov_unit_tests PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${VRSFOV_VULKAN_INCLUDE_DIR})
-if(NOT VRSFOV_FRAME)
+if(VRSFOV_OPENXR)
   target_include_directories(vrsfov_unit_tests PRIVATE ${VRSFOV_OPENXR_INCLUDE_DIR})
 endif()
 target_compile_options(vrsfov_unit_tests PRIVATE -Wall -Wextra)
@@ -84,7 +84,7 @@ if(VRSFOV_BUILD_GPU_TESTS)
   target_link_libraries(vk_layer_probe PRIVATE dl)
   add_test(NAME vk_layer_probe COMMAND vk_layer_probe ${CMAKE_BINARY_DIR}/libvrsfov.so)
 
-  if(NOT VRSFOV_FRAME)
+  if(VRSFOV_OPENXR)
   # ---------------------------------------------------------------------------
   # OpenXR layer probe: loads the API layer through the OpenXR loader. It does
   # not need a runtime (negotiation happens first).

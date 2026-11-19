@@ -5,12 +5,12 @@ VRS-based foveated rendering for Linux VR using `VK_KHR_fragment_shading_rate`.
 | Target | Artifacts | Use case | Gaze source |
 |---|---|---|---|
 | `pc` | `libvrsfov.so` (Vulkan + OpenXR layers), `vrsfov-gaze`, `vrsfov-overlay` | Native OpenXR, Proton OpenXR (`wineopenxr` + DXVK/vkd3d-proton), and OpenVR games | `XR_EXT_eye_gaze_interaction` (OpenXR) or `vrsfov-gaze` over `/dev/shm/vrsfov-gaze` (OpenVR) |
-| `frame` | `libvrsfov.so` (Vulkan layer), `vrsfov-gaze` | Steam Frame / standalone Vulkan apps (OpenVR and native) | `vrsfov-gaze` over `/dev/shm/vrsfov-gaze` |
+| `frame` | `libvrsfov.so` (Vulkan + OpenXR layers), `vrsfov-gaze` | Steam Frame: Proton OpenXR games (`wineopenxr` + DXVK) and OpenVR games | `XR_EXT_eye_gaze_interaction` (OpenXR) or `vrsfov-gaze` over `/dev/shm/vrsfov-gaze` (OpenVR) |
 
 ## How it works
 
 - **Vulkan half**: Enables `VK_KHR_fragment_shading_rate` at device creation, attaches an `R8_UINT` shading-rate image to render passes and dynamic rendering, sets pipeline combiner ops (`KEEP`/`MAX`), and updates the rate map using **transfer commands only** (`vkCmdCopyBufferToImage` from precomputed pattern buffers at a gaze-dependent offset).
-- **OpenXR half (`pc` target)**: Tracks the session's `VkDevice`, per-eye FOV, `xrEndFrame` projection views, and `XR_EXT_eye_gaze_interaction` pose, publishing an immutable snapshot for the Vulkan half.
+- **OpenXR half (both targets)**: Tracks the session's `VkDevice`, per-eye FOV, `xrEndFrame` projection views, and `XR_EXT_eye_gaze_interaction` pose, publishing an immutable snapshot for the Vulkan half. On Wine, `wineopenxr` bridges the game's OpenXR calls to the host loader, so the API layer loads in the game process exactly as it does natively.
 - **OpenVR & standalone mode**: When an OpenVR client (`vrclient.so` / `vrclient.dll`) is loaded without OpenXR, the layer automatically enters standalone mode and reads per-eye gaze and recommended render size from the out-of-process `vrsfov-gaze` publisher (`/dev/shm/vrsfov-gaze`). On the `frame` target, `standalone = 1` is the default. No SteamVR client is ever created inside the game process.
 
 Design details are in [`plan/00-overview.md`](plan/00-overview.md) and [`PLAN.md`](PLAN.md).
@@ -28,7 +28,7 @@ Design details are in [`plan/00-overview.md`](plan/00-overview.md) and [`PLAN.md
 This installs:
 - `~/.local/share/vrsfov/` (`libvrsfov.so`, `vrsfov-gaze`, `vrsfov-overlay`) with symlinks in `~/.local/bin/`
 - `~/.local/share/vulkan/implicit_layer.d/VkLayer_vrsfov.json`
-- `~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json` (`pc` target)
+- `~/.local/share/openxr/1/api_layers/implicit.d/XrApiLayer_vrsfov.json` (both targets; `--frame` builds the OpenXR half too, disable with `-DVRSFOV_BUILD_OPENXR=OFF`)
 - `~/.config/systemd/user/vrsfov-gaze.service` (stays idle at 0% CPU until an OpenVR game renders)
 
 Enable per game in Steam launch options:
@@ -93,7 +93,8 @@ ctest --test-dir build-frame --output-on-failure
 
 | CMake Option | Default | Description |
 |---|---|---|
-| `VRSFOV_PLATFORM` | `pc` | `pc` (Vulkan + OpenXR) or `frame` (Vulkan only, standalone by default) |
+| `VRSFOV_PLATFORM` | `pc` | `pc` (Vulkan + OpenXR) or `frame` (standalone default + OpenXR for OpenXR games) |
+| `VRSFOV_BUILD_OPENXR` | `ON` | Build the OpenXR API layer half (always on for `pc`; `OFF` gives a Vulkan-only `frame` build) |
 | `VRSFOV_USE_SYSTEM_HEADERS` | `OFF` | Use system Vulkan/OpenXR/OpenVR headers instead of FetchContent |
 | `VRSFOV_BUILD_TESTS` | `ON` | Build unit tests and register `ctest` entries |
 | `VRSFOV_BUILD_GPU_TESTS` | `ON` | Build headless GPU end-to-end tests |
